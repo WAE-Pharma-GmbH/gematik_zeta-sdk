@@ -26,10 +26,11 @@ package de.gematik.zeta.driver
 
 import de.gematik.zeta.driver.model.ConfigureRequest
 import de.gematik.zeta.driver.model.SdkInstanceConfig
+import de.gematik.zeta.driver.model.toKtorLogLevel
+import de.gematik.zeta.logging.Log
 import de.gematik.zeta.sdk.ZetaSdkClient
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
 import de.gematik.zeta.sdk.storage.InMemoryStorage
-import io.ktor.client.plugins.logging.LogLevel
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -73,17 +74,27 @@ public open class TestDriverManager(
     }
 
     public open fun getStorageSnapshot(): JsonObject {
-        val snapshot = store.map.toList()
         return buildJsonObject {
-            snapshot.forEach { (key, value) ->
+            store.map.forEach { (key, value) ->
                 val trimmed = value.trim()
                 val element: JsonElement = runCatching {
                     kotlinx.serialization.json.Json.parseToJsonElement(trimmed)
-                }.getOrElse {
-                    JsonPrimitive(trimmed)
-                }
+                }.getOrElse { JsonPrimitive(trimmed) }
                 put(key, element)
             }
+
+            store.map.entries
+                .firstOrNull { it.key.startsWith("dpop_private_key") }
+                ?.let { put("dpop_private_key", JsonPrimitive(it.value)) }
+            store.map.entries
+                .firstOrNull { it.key.startsWith("dpop_public_key") }
+                ?.let { put("dpop_public_key", JsonPrimitive(it.value)) }
+            store.map.entries
+                .firstOrNull { it.key.startsWith("client_private_key") }
+                ?.let { put("client_private_key", JsonPrimitive(it.value)) }
+            store.map.entries
+                .firstOrNull { it.key.startsWith("client_public_key") }
+                ?.let { put("client_public_key", JsonPrimitive(it.value)) }
         }
     }
 
@@ -100,7 +111,7 @@ public open class TestDriverManager(
 
     private fun createHttpClient(): ZetaHttpClient {
         return sdk.httpClient {
-            logging(LogLevel.ALL)
+            logging(Log.logLevel.toKtorLogLevel())
             disableServerValidation(config.disableTlsVerification)
             customCaPems.forEach { pem -> addCaPem(pem) }
         }

@@ -33,6 +33,7 @@ import de.gematik.zeta.sdk.attestation.model.Platform
 import de.gematik.zeta.sdk.attestation.model.PlatformProductId
 import de.gematik.zeta.sdk.attestation.model.PostureType
 import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import de.gematik.zeta.sdk.tpm.Tpm
 import de.gematik.zeta.sdk.tpm.TpmProvider
 import de.gematik.zeta.sdk.tpm.TpmStorageImpl
@@ -76,7 +77,7 @@ class AttestationApiTest {
         val productVersion = "0.2.0"
         val tokenEndpoint = "https://zeta-test.de/token"
 
-        val api = AttestationApiImpl(Tpm.provider(TpmStorageImpl(InMemoryStorage())), { fixedUuid })
+        val api = AttestationApiImpl(Tpm.provider(TpmStorageImpl(InMemoryStorage(), ResourceScope("", emptyList()))), { fixedUuid })
         val jwt = api.createClientAssertion(
             productId = productId,
             productVersion = productVersion,
@@ -101,7 +102,7 @@ class AttestationApiTest {
         val productVersion = "0.2.0"
         val tokenEndpoint = "https://zeta-test.de/token"
 
-        val api = AttestationApiImpl(Tpm.provider(TpmStorageImpl(InMemoryStorage())), { fixedUuid })
+        val api = AttestationApiImpl(Tpm.provider(TpmStorageImpl(InMemoryStorage(), ResourceScope("", emptyList()))), { fixedUuid })
         val jwt = api.createClientAssertion(
             productId = productId,
             productVersion = productVersion,
@@ -129,7 +130,7 @@ class AttestationApiTest {
         val productVersion = "0.2.0"
         val tokenEndpoint = "https://zeta-test.de/token"
 
-        val api = AttestationApiImpl(Tpm.provider(TpmStorageImpl(InMemoryStorage())), { fixedUuid })
+        val api = AttestationApiImpl(Tpm.provider(TpmStorageImpl(InMemoryStorage(), ResourceScope("", emptyList()))), { fixedUuid })
         val jwt = api.createClientAssertion(
             productId = productId,
             productVersion = productVersion,
@@ -314,7 +315,7 @@ class AttestationApiTest {
         var capturedSignInput = byteArrayOf()
 
         val tpm = object : FakeTpmProvider() {
-            override suspend fun generateDpopKey(resource: String): PublicKeyOut {
+            override suspend fun generateDpopKey(): PublicKeyOut {
                 error(notInScope)
             }
 
@@ -548,7 +549,7 @@ class AttestationApiTest {
             ),
         )
 
-        override suspend fun generateDpopKey(resource: String): PublicKeyOut = PublicKeyOut(
+        override suspend fun generateDpopKey(): PublicKeyOut = PublicKeyOut(
             encoded = ByteArray(32) { 0x01 },
             jwk = Jwk("fake-kid", "EC", "ES256", "sig", "P-256", "fake-x", "fake-y"),
         )

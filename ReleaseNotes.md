@@ -31,6 +31,20 @@ It provides SDK bindings for kotlin (as original implementation), Java, and C++.
 
 ### Known issues:
 
+## Changes in 1.2.2 (from 1.2.0)
+
+### New Features
+
+- Log verbosity in load driver is configurable
+
+### Bug Fixes
+
+- ANFTI-697: websocket fragmentation
+- ANFTI-651: C# Exception Handling
+- ANFTI2-735: rework Access Token storage to reduce key size (was too big) and include ability for scope-specific access tokens for the same resource (DiPag)
+- Removal of SMCB Subject Token provider as it was a test tool and never meant for production (see  [README](README.md))
+- Netty CVE finding in testdriver
+
 ## Changes in 1.2.0 (from 1.0.2)
 
 ### New Features

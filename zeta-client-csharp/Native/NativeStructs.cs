@@ -76,12 +76,6 @@ internal struct NativeCustomSmcbVTable
 [StructLayout(LayoutKind.Sequential)]
 internal struct NativeSmcbConfig
 {
-    public IntPtr baseUrl;
-    public IntPtr mandantId;
-    public IntPtr clientSystemId;
-    public IntPtr workspaceId;
-    public IntPtr userId;
-    public IntPtr cardHandle;
     public IntPtr customSmcb;
 }
 
@@ -93,8 +87,8 @@ internal struct NativeAuthConfig
     public long   exp;
     [MarshalAs(UnmanagedType.I1)] public bool aslProdEnvironment;
     public IntPtr smbConfig;
-    public IntPtr smcbConfig;
     public IntPtr requiredOid;
+    public IntPtr smcbConfig;
 }
 
 [StructLayout(LayoutKind.Sequential)] internal struct NativeTpmConfig     { }
@@ -104,6 +98,16 @@ internal struct NativeStorageConfig
     public IntPtr aesB64Key;
     public IntPtr storagePath;
     public IntPtr customStorage;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeNetworkConfig
+{
+    public long connectTimeoutMillis;
+    public long requestTimeoutMillis;
+    public long socketTimeoutMillis;
+    public int  maxRetries;
+    [MarshalAs(UnmanagedType.I1)] public bool retryOnlyIdempotent;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -119,6 +123,7 @@ internal struct NativeBuildConfig
     public IntPtr logVTable;
     public IntPtr proxyConfig;
     public IntPtr securityConfig;
+    public IntPtr networkConfig;
 }
 
 [StructLayout(LayoutKind.Explicit)]

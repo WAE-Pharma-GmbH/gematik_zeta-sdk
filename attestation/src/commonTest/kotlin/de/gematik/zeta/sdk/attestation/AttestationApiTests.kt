@@ -154,7 +154,7 @@ class AttestationApiImplTest {
         val notInScope = "Not scope of test"
 
         val tpmProvider = object : FakeTpmProvider() {
-            override suspend fun generateDpopKey(resource: String): PublicKeyOut {
+            override suspend fun generateDpopKey(): PublicKeyOut {
                 error(notInScope)
             }
 
@@ -342,7 +342,7 @@ class AttestationApiImplTest {
             ),
         )
 
-        override suspend fun generateDpopKey(resource: String): PublicKeyOut = PublicKeyOut(
+        override suspend fun generateDpopKey(): PublicKeyOut = PublicKeyOut(
             encoded = ByteArray(32) { 0x01 },
             jwk = Jwk(
                 kid = "fake-kid",

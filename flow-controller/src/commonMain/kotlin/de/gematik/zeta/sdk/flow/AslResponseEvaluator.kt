@@ -38,7 +38,7 @@ class AslResponseEvaluator : ResponseEvaluator {
 
             500 -> {
                 Log.w { "ASL 500 response. Retrying handshake" }
-                ctx.aslStorage.clear(ctx.resource)
+                ctx.aslStorage.clear()
                 FlowDirective.Perform(FlowNeed.Asl)
             }
 

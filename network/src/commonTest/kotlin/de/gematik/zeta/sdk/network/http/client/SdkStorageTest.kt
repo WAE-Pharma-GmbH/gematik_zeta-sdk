@@ -26,40 +26,51 @@ package de.gematik.zeta.sdk.network.http.client
 
 import de.gematik.zeta.sdk.network.http.client.CompositeCookieStorage.Companion.ZETA_ROUTE_COOKIE
 import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import io.ktor.http.Cookie
 import io.ktor.http.Url
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SdkCookieStorageTest {
     private val url = Url("https://example.com/path")
-    private fun createComposite(fqdn: String = "example.com"): Pair<CompositeCookieStorage, SdkCookieStorage> {
-        val sdkStorage = SdkCookieStorage(InMemoryStorage(), fqdn)
+    private val resourceScope = ResourceScope("https://example.com", listOf("scope-a"))
+
+    private fun createComposite(
+        scope: ResourceScope = resourceScope,
+    ): Pair<CompositeCookieStorage, SdkCookieStorage> {
+        val sdkStorage = SdkCookieStorage(InMemoryStorage(), scope)
         return CompositeCookieStorage(sdkStorage) to sdkStorage
     }
 
-    private fun createStorage(fqdn: String = "example.com"): Pair<SdkCookieStorage, InMemoryStorage> {
+    private fun createStorage(
+        scope: ResourceScope = resourceScope,
+    ): Pair<SdkCookieStorage, InMemoryStorage> {
         val storage = InMemoryStorage()
-        return SdkCookieStorage(storage, fqdn) to storage
+        return SdkCookieStorage(storage, scope) to storage
     }
 
     @Test
     fun get_returnsEmpty_whenNoCookieStored() = runTest {
+        // Arrange
         val (storage, _) = createStorage()
 
+        // Act & Assert
         assertTrue(storage.get(url).isEmpty())
     }
 
     @Test
     fun addCookie_storesZetaRoute_andGetReturnsIt() = runTest {
+        // Arrange
         val (storage, _) = createStorage()
-        storage.addCookie(url, Cookie(name = ZETA_ROUTE_COOKIE, value = "abc123"))
-        val cookies = storage.get(url)
 
+        // Act
+        storage.addCookie(url, Cookie(name = ZETA_ROUTE_COOKIE, value = "abc123"))
+
+        // Assert
+        val cookies = storage.get(url)
         assertEquals(1, cookies.size)
         assertEquals(ZETA_ROUTE_COOKIE, cookies[0].name)
         assertEquals("abc123", cookies[0].value)
@@ -67,174 +78,115 @@ class SdkCookieStorageTest {
 
     @Test
     fun addCookie_overwritesExistingZetaRoute() = runTest {
+        // Arrange
         val (storage, _) = createStorage()
         storage.addCookie(url, Cookie(name = ZETA_ROUTE_COOKIE, value = "first"))
-        storage.addCookie(url, Cookie(name = ZETA_ROUTE_COOKIE, value = "second"))
-        val cookies = storage.get(url)
 
+        // Act
+        storage.addCookie(url, Cookie(name = ZETA_ROUTE_COOKIE, value = "second"))
+
+        // Assert
+        val cookies = storage.get(url)
         assertEquals(1, cookies.size)
         assertEquals("second", cookies[0].value)
     }
 
     @Test
     fun clearCookie_removesStoredValue() = runTest {
+        // Arrange
         val (storage, _) = createStorage()
         storage.addCookie(url, Cookie(name = ZETA_ROUTE_COOKIE, value = "abc123"))
+
+        // Act
         storage.clearCookie()
 
+        // Assert
         assertTrue(storage.get(url).isEmpty())
     }
 
     @Test
-    fun differentFqdns_useDifferentStorageKeys() = runTest {
+    fun differentScopes_useDifferentStorageKeys() = runTest {
+        // Arrange
         val underlyingStorage = InMemoryStorage()
-        val storage1 = SdkCookieStorage(underlyingStorage, "host1.example.com")
-        val storage2 = SdkCookieStorage(underlyingStorage, "host2.example.com")
+        val scope1 = ResourceScope("https://host1.example.com", listOf("scope-a"))
+        val scope2 = ResourceScope("https://host2.example.com", listOf("scope-a"))
+        val storage1 = SdkCookieStorage(underlyingStorage, scope1)
+        val storage2 = SdkCookieStorage(underlyingStorage, scope2)
+
+        // Act
         storage1.addCookie(url, Cookie(name = ZETA_ROUTE_COOKIE, value = "value1"))
 
+        // Assert
         assertTrue(storage2.get(url).isEmpty())
     }
 
     @Test
-    fun sameFqdn_sharesStorageKey() = runTest {
+    fun sameScope_sharesStorageKey() = runTest {
+        // Arrange
         val underlyingStorage = InMemoryStorage()
-        val storage1 = SdkCookieStorage(underlyingStorage, "example.com")
-        val storage2 = SdkCookieStorage(underlyingStorage, "example.com")
+        val scope = ResourceScope("https://example.com", listOf("scope-a"))
+        val storage1 = SdkCookieStorage(underlyingStorage, scope)
+        val storage2 = SdkCookieStorage(underlyingStorage, scope)
+
+        // Act
         storage1.addCookie(url, Cookie(name = ZETA_ROUTE_COOKIE, value = "shared"))
 
+        // Assert
         assertEquals("shared", storage2.get(url)[0].value)
     }
 
     @Test
     fun addCookie_zetaRoute_isRoutedToSdkStorage() = runTest {
+        // Arrange
         val (composite, sdkStorage) = createComposite()
-        composite.addCookie(url, Cookie(name = ZETA_ROUTE_COOKIE, value = "abc123"))
-        val cookies = sdkStorage.get(url)
 
+        // Act
+        composite.addCookie(url, Cookie(name = ZETA_ROUTE_COOKIE, value = "abc123"))
+
+        // Assert
+        val cookies = sdkStorage.get(url)
         assertEquals(1, cookies.size)
         assertEquals("abc123", cookies[0].value)
     }
 
     @Test
     fun addCookie_nonZetaRoute_isRoutedToDefaultStorage() = runTest {
+        // Arrange
         val (composite, sdkStorage) = createComposite()
+
+        // Act
         composite.addCookie(url, Cookie(name = "session", value = "xyz"))
 
+        // Assert
         assertTrue(sdkStorage.get(url).isEmpty())
         assertTrue(composite.get(url).any { it.name == "session" && it.value == "xyz" })
     }
 
     @Test
     fun get_returnsCookiesFromBothStorages() = runTest {
+        // Arrange
         val (composite, _) = createComposite()
+
+        // Act
         composite.addCookie(url, Cookie(name = ZETA_ROUTE_COOKIE, value = "route123"))
         composite.addCookie(url, Cookie(name = "session", value = "sess456"))
-        val cookies = composite.get(url)
 
+        // Assert
+        val cookies = composite.get(url)
         assertTrue(cookies.any { it.name == ZETA_ROUTE_COOKIE && it.value == "route123" })
         assertTrue(cookies.any { it.name == "session" && it.value == "sess456" })
     }
 
     @Test
     fun addCookie_zetaRoute_notStoredInDefaultStorage() = runTest {
+        // Arrange
         val (composite, _) = createComposite()
+
+        // Act
         composite.addCookie(url, Cookie(name = ZETA_ROUTE_COOKIE, value = "abc123"))
+
+        // Assert
         val cookies = composite.get(url)
-
         assertEquals(1, cookies.filter { it.name == ZETA_ROUTE_COOKIE }.size)
-    }
-
-    class SerializableCookieTest {
-
-        @Test
-        fun toCookie_mapsAllFields() {
-            val serializable = SerializableCookie(
-                name = "zeta_route",
-                value = "abc123",
-                domain = "example.com",
-                path = "/",
-                maxAge = 3600,
-                secure = true,
-                httpOnly = true,
-            )
-
-            val cookie = serializable.toCookie()
-
-            assertEquals("zeta_route", cookie.name)
-            assertEquals("abc123", cookie.value)
-            assertEquals("example.com", cookie.domain)
-            assertEquals("/", cookie.path)
-            assertEquals(3600, cookie.maxAge)
-            assertTrue(cookie.secure)
-            assertTrue(cookie.httpOnly)
-        }
-
-        @Test
-        fun toCookie_mapsNullableFieldsAsNull() {
-            val serializable = SerializableCookie(name = "zeta_route", value = "abc123")
-            val cookie = serializable.toCookie()
-
-            assertNull(cookie.domain)
-            assertNull(cookie.path)
-            assertNull(cookie.maxAge)
-            assertFalse(cookie.secure)
-            assertFalse(cookie.httpOnly)
-        }
-
-        @Test
-        fun from_mapsAllFields() {
-            val cookie = Cookie(
-                name = "zeta_route",
-                value = "abc123",
-                domain = "example.com",
-                path = "/",
-                maxAge = 3600,
-                secure = true,
-                httpOnly = true,
-            )
-            val serializable = SerializableCookie.from(cookie)
-
-            assertEquals("zeta_route", serializable.name)
-            assertEquals("abc123", serializable.value)
-            assertEquals("example.com", serializable.domain)
-            assertEquals("/", serializable.path)
-            assertEquals(3600, serializable.maxAge)
-            assertTrue(serializable.secure)
-            assertTrue(serializable.httpOnly)
-        }
-
-        @Test
-        fun from_mapsNullableFieldsAsNull() {
-            val cookie = Cookie(name = "zeta_route", value = "abc123")
-            val serializable = SerializableCookie.from(cookie)
-
-            assertNull(serializable.domain)
-            assertNull(serializable.path)
-            assertNull(serializable.maxAge)
-            assertFalse(serializable.secure)
-            assertFalse(serializable.httpOnly)
-        }
-
-        @Test
-        fun fromAndToCookie_isRoundtrip() {
-            val original = Cookie(
-                name = "session",
-                value = "xyz789",
-                domain = "test.com",
-                path = "/api",
-                maxAge = 600,
-                secure = false,
-                httpOnly = true,
-            )
-            val roundTrip = SerializableCookie.from(original).toCookie()
-
-            assertEquals(original.name, roundTrip.name)
-            assertEquals(original.value, roundTrip.value)
-            assertEquals(original.domain, roundTrip.domain)
-            assertEquals(original.path, roundTrip.path)
-            assertEquals(original.maxAge, roundTrip.maxAge)
-            assertEquals(original.secure, roundTrip.secure)
-            assertEquals(original.httpOnly, roundTrip.httpOnly)
-        }
     }
 }

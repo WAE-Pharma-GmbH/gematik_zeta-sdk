@@ -204,7 +204,16 @@ int main() {
 
     ZetaSdk_TpmConfig tpmConfig = {};
     ZetaSdk_SmbConfig smbConfig = { keystoreFile, alias, password };
-    ZetaSdk_AuthConfig authConfig = { scopes, ARRAY_SIZE(scopes), 30, aslProd, &smbConfig, nullptr, requiredRoleOid };
+    ZetaSdk_AuthConfig authConfig = {
+            .scopes             = scopes,
+            .scopesCount        = ARRAY_SIZE(scopes),
+            .exp                = 30,
+            .aslProdEnvironment = aslProd,
+            .smbConfig          = &smbConfig,
+            .requiredOid        = requiredRoleOid,
+            .smcbConfig         = nullptr,
+    };
+
 
     char* caPem[] = {
             const_cast<char*>(R"(-----BEGIN CERTIFICATE-----
@@ -218,7 +227,7 @@ int main() {
     security.additionalCaPem = const_cast<char**>(caPem);
     security.additionalCaPemCount = 1;
     //security.additionalCaFile = const_cast<char*>(caPemFile);
-    //security.disableServerValidation = disableTls;
+    security.disableServerValidation = disableTls;
     //security.sslVerbose = false;
 
     // Custom log callback

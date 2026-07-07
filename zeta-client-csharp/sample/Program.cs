@@ -25,6 +25,10 @@
 using ZetaSdk;
 using ZetaSdk.Config;
 
+bool disableTls = string.Equals(
+    Environment.GetEnvironmentVariable("DISABLE_SERVER_VALIDATION"), "true",
+    StringComparison.OrdinalIgnoreCase);
+
 var config = new ZetaClientConfig
 {
     Resource       = Env("FACHDIENST_URL"),
@@ -46,16 +50,6 @@ var config = new ZetaClientConfig
              Alias        = Env("SMB_KEYSTORE_ALIAS"),
              Password     = Env("SMB_KEYSTORE_PASSWORD")
          },
-        Smcb = string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SMCB_BASE_URL")) ? null
-            : new ZetaSmcbConfig
-            {
-                BaseUrl        = Env("SMCB_BASE_URL"),
-                MandantId      = Env("SMCB_MANDANT_ID"),
-                ClientSystemId = Env("SMCB_CLIENT_SYSTEM_ID"),
-                WorkspaceId    = Env("SMCB_WORKSPACE_ID"),
-                UserId         = Env("SMCB_USER_ID"),
-                CardHandle     = Env("SMCB_CARD_HANDLE")
-            },
         //CustomSmcb = new MyCustomConnector(),
         RequiredRoleOid = Env("REQUIRED_ROLE_OID")
      },
@@ -82,20 +76,33 @@ var config = new ZetaClientConfig
             """
                 ],*/
           // AdditionalCaFile = "/path/to/ca.crt",
-          DisableServerValidation = false,
+          DisableServerValidation = disableTls,
           SslVerbose = false,
-      }
+      },
+       Network = new NetworkConfig
+       {
+           ConnectTimeoutMillis = 15_000,
+           RequestTimeoutMillis = 120_000,
+           SocketTimeoutMillis  = 120_000, // >= RequestTimeoutMillis, see warning below
+           MaxRetries           = 2,
+           RetryOnlyIdempotent  = true,
+       },
 };
-
-bool disableTls = string.Equals(
-    Environment.GetEnvironmentVariable("DISABLE_SERVER_VALIDATION"), "true",
-    StringComparison.OrdinalIgnoreCase);
 
 string poppToken    = Env("POPP_TOKEN");
 string wsBaseUrl    = Env("WS_BASE_URL");
 string wsContextPath= Env("WS_SERVER_CONTEXT_PATH");
 
-using var client = ZetaClient.Build(config);
+ZetaClient? client = null;
+try
+{
+    client = ZetaClient.Build(config);
+}
+catch (ZetaSdkException ex)
+{
+    Console.WriteLine($"Error while building SDK: {ex.Message}");
+    return;
+}
 
 // Http sample
 Console.WriteLine("HTTP sample");

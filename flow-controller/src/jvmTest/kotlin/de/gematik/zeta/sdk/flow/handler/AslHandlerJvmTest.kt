@@ -31,6 +31,7 @@ import de.gematik.zeta.sdk.flow.FlowContext
 import de.gematik.zeta.sdk.flow.FlowNeed
 import de.gematik.zeta.sdk.flow.handler.AslHandler
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpResponse
+import de.gematik.zeta.sdk.storage.ResourceScope
 import io.ktor.client.request.HttpRequestBuilder
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -51,7 +52,7 @@ class AslHandlerJvmTest {
 
     @BeforeTest
     fun setUp() {
-        every { flowCtx.resource } returns "https://resource.example.com"
+        every { flowCtx.resourceScope } returns ResourceScope("https://resource.example.com", emptyList())
         every { flowCtx.configurationStorage } returns configStorage
         coEvery { aslApi.encrypt(any(), any()) } answers { firstArg() }
     }
@@ -80,14 +81,14 @@ class AslHandlerJvmTest {
 
     @Test
     fun handle_returnsRetryRequest_whenAslUseIsRequired() = runTest {
-        coEvery { configStorage.aslUse(any()) } returns ZetaAslUse.REQUIRED
+        coEvery { configStorage.aslUse() } returns ZetaAslUse.REQUIRED
 
         assertIs<CapabilityResult.RetryRequest>(handler.handle(FlowNeed.Asl, flowCtx))
     }
 
     @Test
     fun handle_retryMutate_callsEncryptExactlyOnce_whenRequired() = runTest {
-        coEvery { configStorage.aslUse(any()) } returns ZetaAslUse.REQUIRED
+        coEvery { configStorage.aslUse() } returns ZetaAslUse.REQUIRED
 
         val result = handler.handle(FlowNeed.Asl, flowCtx) as CapabilityResult.RetryRequest
         result.mutate(HttpRequestBuilder())
@@ -97,14 +98,14 @@ class AslHandlerJvmTest {
 
     @Test
     fun handle_returnsRetryRequest_whenAslUseIsRequiredPassthrough() = runTest {
-        coEvery { configStorage.aslUse(any()) } returns ZetaAslUse.REQUIRED_PASSTHROUGH
+        coEvery { configStorage.aslUse() } returns ZetaAslUse.REQUIRED_PASSTHROUGH
 
         assertIs<CapabilityResult.RetryRequest>(handler.handle(FlowNeed.Asl, flowCtx))
     }
 
     @Test
     fun handle_retryMutate_callsEncryptWithPassThroughTrue_whenRequiredPassthrough() = runTest {
-        coEvery { configStorage.aslUse(any()) } returns ZetaAslUse.REQUIRED_PASSTHROUGH
+        coEvery { configStorage.aslUse() } returns ZetaAslUse.REQUIRED_PASSTHROUGH
 
         val result = handler.handle(FlowNeed.Asl, flowCtx) as CapabilityResult.RetryRequest
         result.mutate(HttpRequestBuilder())
@@ -114,7 +115,7 @@ class AslHandlerJvmTest {
 
     @Test
     fun handle_retryMutate_callsEncryptExactlyOnce_whenRequiredPassthrough() = runTest {
-        coEvery { configStorage.aslUse(any()) } returns ZetaAslUse.REQUIRED_PASSTHROUGH
+        coEvery { configStorage.aslUse() } returns ZetaAslUse.REQUIRED_PASSTHROUGH
 
         val result = handler.handle(FlowNeed.Asl, flowCtx) as CapabilityResult.RetryRequest
         result.mutate(HttpRequestBuilder())
@@ -123,14 +124,14 @@ class AslHandlerJvmTest {
 
     @Test
     fun handle_returnsDone_whenAslUseIsNotSupported() = runTest {
-        coEvery { configStorage.aslUse(any()) } returns ZetaAslUse.NOT_SUPPORTED
+        coEvery { configStorage.aslUse() } returns ZetaAslUse.NOT_SUPPORTED
 
         assertIs<CapabilityResult.Done>(handler.handle(FlowNeed.Asl, flowCtx))
     }
 
     @Test
     fun handle_doesNotCallEncrypt_whenAslUseIsNotSupported() = runTest {
-        coEvery { configStorage.aslUse(any()) } returns ZetaAslUse.NOT_SUPPORTED
+        coEvery { configStorage.aslUse() } returns ZetaAslUse.NOT_SUPPORTED
 
         handler.handle(FlowNeed.Asl, flowCtx)
         coVerify(exactly = 0) { aslApi.encrypt(any(), any()) }
@@ -140,7 +141,7 @@ class AslHandlerJvmTest {
     fun handle_returnsError_whenAslExceptionThrownDuringEncrypt() = runTest {
         val response = mockk<ZetaHttpResponse>(relaxed = true)
         val exception = AslException(response, "ASL handshake failed", 1)
-        coEvery { configStorage.aslUse(any()) } returns ZetaAslUse.REQUIRED
+        coEvery { configStorage.aslUse() } returns ZetaAslUse.REQUIRED
         coEvery { aslApi.encrypt(any(), any()) } throws exception
 
         val result = handler.handle(FlowNeed.Asl, flowCtx)
@@ -155,7 +156,7 @@ class AslHandlerJvmTest {
     fun handle_errorCode_isAslError_whenAslExceptionCaughtDirectly() = runTest {
         val response = mockk<ZetaHttpResponse>(relaxed = true)
         val exception = AslException(response, "timeout", 2)
-        coEvery { configStorage.aslUse(any()) } returns ZetaAslUse.REQUIRED
+        coEvery { configStorage.aslUse() } returns ZetaAslUse.REQUIRED
         coEvery { aslApi.encrypt(any(), any()) } throws exception
 
         val result = handler.handle(FlowNeed.Asl, flowCtx)

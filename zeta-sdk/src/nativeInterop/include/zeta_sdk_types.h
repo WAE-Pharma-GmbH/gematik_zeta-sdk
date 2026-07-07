@@ -167,13 +167,6 @@ typedef struct {
  * All fields are UTF-8 encoded, null-terminated strings owned by the caller.
  */
 typedef struct {
-    char* baseUrl;        /**< Base URL of the Konnektor, e.g. "https://konnektor.example.com" */
-    char* mandantId;      /**< Mandant (client organisation) identifier */
-    char* clientSystemId; /**< Client system identifier registered at the Konnektor */
-    char* workspaceId;    /**< Workplace identifier */
-    char* userId;         /**< User identifier */
-    char* cardHandle;     /**< Card handle identifying the SMC-B card slot */
-
     /**
     * Optional custom SMC-B connector implementation.
     *
@@ -256,7 +249,6 @@ typedef struct {
 /**
  * @brief Authentication configuration for the ZETA SDK.
  *
- * Exactly one of smbConfig or smcbConfig must be non-null.
  * All string fields are UTF-8 encoded, null-terminated strings owned by the caller.
  */
 typedef struct {
@@ -265,8 +257,8 @@ typedef struct {
     int64_t           exp;                  /**< Token expiration time in seconds. Must be greater than 0. */
     bool              aslProdEnvironment;   /**< If true, uses the ASL production environment. Default: true. */
     ZetaSdk_SmbConfig*  smbConfig;          /**< SM-B configuration. Set to NULL when using SMC-B. */
-    ZetaSdk_SmcbConfig* smcbConfig;         /**< SMC-B configuration. Set to NULL when using SM-B. */
     char*             requiredOid;          /**< Required Role-OID that the TI certificate must contain (e.g. "1.2.276.0.76.4.156" for oid_epa_vau) */
+    ZetaSdk_SmcbConfig* smcbConfig;         /**< SMC-B configuration. Set to NULL when using SM-B. */
 } ZetaSdk_AuthConfig;
 
 /**
@@ -280,14 +272,35 @@ typedef struct {
     int         type;     /**< Proxy type: 0=HTTP, 1=SOCKS */
 } ZetaSdk_ProxyConfig;
 
-
+/**
+ * @brief TLS/certificate security configuration for the ZETA SDK.
+ *
+ * Pass a zero-initialized instance for strict default validation
+ * (system trust store, full chain/SAN/revocation checks).
+ *
+ */
 typedef struct {
-    char** additionalCaPem;
-    int    additionalCaPemCount;
-    char*  additionalCaFile;
-    bool   disableServerValidation;
-    bool   sslVerbose;
+    char** additionalCaPem;          /**< Additional trusted CA certs (PEM). */
+    int    additionalCaPemCount;     /**< Number of entries in additionalCaPem. */
+    char*  additionalCaFile;         /**< Path to a PEM file with additional trusted CAs. NULL = none. */
+    bool   disableServerValidation;  /**< Disables all TLS validation. Dev/test only. */
+    bool   sslVerbose;               /**< Enables verbose TLS handshake logging. Default: false. */
 } ZetaSdk_SecurityConfig;
+
+/**
+ * @brief Network timeout and retry configuration for the ZETA SDK.
+ *
+ * All timeout values are in milliseconds. Pass a zero-initialized instance
+ * to use SDK defaults (connect=15000, request=30000, socket=60000).
+ *
+ */
+typedef struct {
+    int64_t connectTimeoutMillis;   /**< 0 = use SDK default (15000ms) */
+    int64_t requestTimeoutMillis;   /**< 0 = use SDK default (30000ms) */
+    int64_t socketTimeoutMillis;    /**< 0 = use SDK default (60000ms) */
+    int     maxRetries;             /**< 0 = no retries */
+    bool    retryOnlyIdempotent;    /**< Default: true. Ignored if maxRetries == 0. */
+} ZetaSdk_NetworkConfig;
 
 /**
  * @brief Top-level build configuration for creating a ZetaSdk_Client.
@@ -305,7 +318,8 @@ typedef struct {
     ZetaSdk_AuthConfig*    authConfig;     /**< Authentication configuration. Must not be NULL. */
     ZetaSdk_LogVTable*     logVTable;      /**< Optional custom log provider. */
     ZetaSdk_ProxyConfig*   proxyConfig;    /**< Optional proxy configuration. Pass NULL to disable proxy. */
-    ZetaSdk_SecurityConfig* securityConfig;
+    ZetaSdk_SecurityConfig* securityConfig; /**< Optional TLS/certificate validation configuration. NULL = strict default validation (system trust store, full chain/SAN/revocation checks). */
+    ZetaSdk_NetworkConfig*  networkConfig;  /**< Optional. NULL = SDK defaults for all timeouts/retries. */
 } ZetaSdk_BuildConfig;
 
 

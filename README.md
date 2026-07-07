@@ -24,6 +24,14 @@ the different clients and how to use them.
 
 [[_TOC_]]
 
+### Notes
+
+- In release 1.2.2 the SmcbSubjectToken provider was removed as it was a testing tool only and also
+did not fully implement the requirements for a production connector connection. As a replacement
+we point to this
+[github repo](https://github.com/gematik/zeta-cli/tree/main/connector/src) that has already been
+tested with connectors (but still needs to be wrapped into a CustomSubjectTokenProvider)
+
 ## Architecture overview
 
 The Zeta Client SDK is build with Kotlin Multiplatform (KMP) to target multiple platforms (iOS, Android and JVM),
@@ -229,12 +237,6 @@ Here are the items you need to adapt:
 | SMB_KEYSTORE_ALIAS        | Alias of the key in the SM-B Certificate file                                                                                                          |                                                            |
 | SMB_KEYSTORE_PASSWORD     | Password for the private key                                                                                                                           |                                                            |
 | SMB_KEYSTORE_B64          | base64-encoded Keystore being used in the load driver; must be present, empty string if not used.                                                      |                                                            |
-| SMCB_BASE_URL             | base url of the konnektor webservice interface (needs to include the "/ws")                                                                            |                                                            |
-| SMCB_MANDANT_ID           | <mandanten-ID>  for connector calls                                                                                                                    |                                                            |
-| SMCB_CLIENT_SYSTEM_ID     | <client_system_id>  for connector calls                                                                                                                |                                                            |
-| SMCB_WORKSPACE_ID         | <workspace_id> for connector calls                                                                                                                     |                                                            |
-| SMCB_USER_ID              | <user-id> - is required for SMC-B but is being ignored                                                                                                 |                                                            |
-| SMCB_CARD_HANDLE          | <smcb-card-handle>                                                                                                                                     |                                                            |
 | POPP_TOKEN                | Value of a PoPP Tokens, which is given to the PEP (optional)                                                                                           | eyJhbGciOiJFUzI1NiI......                                  |
 | DISABLE_SERVER_VALIDATION | If set to "true", TLS server TLS certificate checks are disabled (for testing only!)                                                                   |                                                            |
 | WS_SERVER_CONTEXT_PATH    | Specifies the base context to target the resource server. It is used in the Java client to prefix STOMP Websockets destinations                        | /testfachdienst                                            |
@@ -243,10 +245,6 @@ Here are the items you need to adapt:
 | STORAGE_AES_KEY           | Base64-encoded AES-256 key used to encrypt session data at rest                                                                                        | 7aae7xXr8rnzVqjpYbosS0CFMrlprkD7jbVotm0fd                  |
 | REQUIRED_ROLE_OID         | Role-OID that the TI certificate must contain. Required for ASL handshake validation                                                                   | 1.2.276.0.76.4.156                                         |
 
-Note that two sets of configuration variables for the SM(C)-B client authentication are provided,
-one for the SM-B certificate file, another for the SMC-B connector interface.
-
-**Only one set of these needs to be provided**
 
 ## The demo client
 
@@ -833,6 +831,33 @@ class ZetaSdkTest {
 }
 `````
 
+### Error Handling (Native clients)
+
+When consuming the SDK from C++, C#, or any other native binding, all exported
+functions follow a consistent error-handling contract:
+
+- **Pointer-returning functions** return `NULL`/`IntPtr.Zero` on failure instead
+  of throwing across the language boundary.
+- **Integer-returning functions** return `-1` on failure (see individual function
+  documentation for any additional negative codes).
+- **`void` functions** simply no-op internally on failure; they never crash the
+  host process.
+
+#### Retrieving the failure reason
+
+Whenever a function returns a failure value, call `ZetaSdk_getLastError()` to
+retrieve a human-readable description of what went wrong:
+
+``````
+ZetaSdk_Client* client = ZetaSdk_buildZetaClient(&buildConfig);
+if (client == NULL) {
+    char* err = ZetaSdk_getLastError();
+    fprintf(stderr, "Build failed: %s\n", err ? err : "unknown error");
+    ZetaSdk_freeLastError(err);
+    return 1;
+}
+``````
+
 ### API Overview
 
 This section gives an overview on how to use the API.
@@ -980,16 +1005,44 @@ See InMemoryStorage.kt for a reference implementation using a coroutine Mutex.
 ### Custom SMC-B Connector
 
 You can provide your own implementation by injecting a custom connector via the `AuthConfig`.
-This is useful when you already have an existing SMC-B connector implementation, or when you want to control how the certificate and signing operations are performed.
+This is useful when you already have an existing SMC-B connector implementation, or when you
+want to control how the certificate and signing operations are performed.
 
 **Interface:**
 
-| Method                                  | Description                                                                  |
-|-----------------------------------------|------------------------------------------------------------------------------|
-| `readCertificate()`                     | Return the SMC-B X.509 certificate in DER format                             |
-| `externalAuthenticate(base64Challenge)` | Sign the base64-encoded challenge and return the DER-encoded ECDSA signature |
+| Method | Description |
+|---|---|
+| `readCertificate()` | Return the SMC-B X.509 certificate as raw DER bytes (not PEM) |
+| `externalAuthenticate(base64Challenge)` | Sign the Base64url-encoded challenge and return raw DER-encoded ECDSA signature bytes |
 
----
+**Example:**
+
+`````
+val sdk = ZetaSdk.build(
+    "https://<resource-url>",
+    BuildConfig(
+        ...
+        authConfig = AuthConfig(
+            ...
+            subjectTokenProvider = CustomSmcbTokenProvider(
+                connector = object : CustomConnectorApi {
+                    override suspend fun readCertificate(): ByteArray {
+                        val response = konnektor.readCardCertificate(cardHandle, ...)
+                        return Base64.decode(response.x509Certificate) // raw DER bytes
+                    }
+                    override suspend fun externalAuthenticate(base64Challenge: String): ByteArray {
+                        val response = konnektor.externalAuthenticate(cardHandle, base64Challenge)
+                        return Base64.decode(response.base64Signature) // raw DER-encoded ECDSA
+                    }
+                }
+            ),
+        ),
+    ),
+)
+`````
+
+> **Note:** The SDK converts the DER-encoded ECDSA signature to compact JOSE format internally.
+> Do not perform this conversion in your implementation.
 
 ### Custom Log Provider
 
@@ -1014,6 +1067,105 @@ The default log level is `ERROR`. The callback is invoked synchronously from SDK
 | `WARN`  | Warnings and errors only             |
 | `ERROR` | Errors only (default)                |
 | `NONE`  | No logging                           |
+
+
+### Exported Native Types
+
+Opaque handles:
+
+| Type                   | Created by                                       | Freed by                    |
+|------------------------|--------------------------------------------------|-----------------------------|
+| `ZetaSdk_Client`       | `ZetaSdk_buildZetaClient`                        | `ZetaSdk_clearZetaClient`   |
+| `ZetaSdk_HttpClient`   | `ZetaSdk_buildHttpClient`                        | `ZetaSdk_clearHttpClient`   |
+| `ZetaSdk_WSSession`    | `ZetaSdk_WSSession_create` / `ZetaSdk_Client_ws` | `ZetaSdk_WSSession_close`   |
+| `ZetaSdk_WSMessage`    | `ZetaSdk_WSSession_receiveNext`                  | `ZetaSdk_WSMessage_destroy` |
+| `ZetaSdk_HttpResponse` | any `ZetaHttpClient_*` sync call                 | `ZetaHttpResponse_destroy`  |
+
+Configuration structs:
+
+| Type                     | Key fields                                                                                                                                                     |
+|--------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `ZetaSdk_BuildConfig`    | resource, productId, productVersion, clientName, storageConfig, tpmConfig, authConfig, logVTable, proxyConfig, securityConfig                                  |
+| `ZetaSdk_AuthConfig`     | scopes, scopesCount, exp, aslProdEnvironment, smbConfig, requiredOid, smcbConfig (exactly one of smbConfig/smcbConfig)                                         |
+| `ZetaSdk_SmbConfig`      | keystoreFile, alias, password                                                                                                                                  |
+| `ZetaSdk_SmcbConfig`     | customSmcb (vtable)                                                                                                                                            |
+| `ZetaSdk_StorageConfig`  | aesB64Key, storagePath, customStorage (exactly one of aesB64Key/customStorage)                                                                                 |
+| `ZetaSdk_TpmConfig`      | reserved, currently empty                                                                                                                                      |
+| `ZetaSdk_SecurityConfig` | additionalCaPem, additionalCaPemCount, additionalCaFile, disableServerValidation, sslVerbose                                                                   |
+| `ZetaSdk_NetworkConfig`  | connectTimeoutMillis, requestTimeoutMillis, socketTimeoutMillis, maxRetries, retryOnlyIdempotent (0/zero-init = SDK defaults: 15000/30000/60000ms, no retries) |
+| `ZetaSdk_ProxyConfig`    | host, port, username, password, type (0=HTTP, 1=SOCKS)                                                                                                         |
+| `ZetaSdk_LogVTable`      | context, log, logLevel                                                                                                                                         |
+| `ZetaSdk_HttpRequest`    | url, body, headers, headersCount                                                                                                                               |
+| `ZetaSdk_HttpHeader`     | key, value                                                                                                                                                     |
+
+Callback vtables:
+
+| Type                    | Required functions                    |
+|-------------------------|---------------------------------------|
+| `ZetaSdk_StorageVTable` | put, get, remove, clear               |
+| `ZetaSdk_SmcbVTable`    | readCertificate, externalAuthenticate |
+
+Field order in these structs must exactly match the generated header (`zeta_sdk_api.h` / `libzeta_sdk_api.h`).
+Note: A mismatched order silently misreads fields instead of failing.
+
+### Exported Native Functions
+
+**Lifecycle:**
+
+| Function                  | Returns on failure | Description                         |
+|---------------------------|--------------------|-------------------------------------|
+| `ZetaSdk_buildZetaClient` | `NULL`             | Builds a client instance            |
+| `ZetaSdk_clearZetaClient` | no-op              | Frees a client                      |
+| `ZetaSdk_close`           | `-1`               | Closes client (keeps cache)         |
+| `ZetaSdk_status`          | `-1`               | Returns status code                 |
+| `ZetaSdk_getLastError`    | `NULL`             | Gets last error message (must free) |
+| `ZetaSdk_freeLastError`   | no-op              | Frees error string                  |
+
+Status codes: `0` NOT_REGISTERED · `1` REGISTERED_NO_VALID_TOKENS · `2` HAS_REFRESH_TOKEN · `3` HAS_ACCESS_AND_REFRESH_TOKEN · `-1` boundary error (check ZetaSdk_getLastError) · `-2` status undetermined
+
+**Auth & registration:**
+
+| Function                    | Returns on failure | Description              |
+|-----------------------------|--------------------|--------------------------|
+| `ZetaSdk_discover`          | `-1`               | Runs discovery           |
+| `ZetaSdk_register`          | `-1`               | Runs client registration |
+| `ZetaSdk_authenticate`      | `-1`               | Runs authentication      |
+| `ZetaSdk_logout`            | `-1`               | Clears tokens            |
+| `ZetaSdk_clearRegistration` | `-1`               | Clears registration only |
+
+**HTTP (sync):**
+
+| Function                                                | Description            |
+|---------------------------------------------------------|------------------------|
+| `ZetaSdk_buildHttpClient`                               | Creates an HTTP client |
+| `ZetaSdk_clearHttpClient`                               | Frees an HTTP client   |
+| `ZetaHttpClient_get/post/put/patch/delete/head/options` | Performs the HTTP call |
+| `ZetaHttpResponse_destroy`                              | Frees a response       |
+
+Failure: response `error` field is set, not `NULL`.
+
+**HTTP (async):**
+
+| Function                                                                                   | Description                   |
+|--------------------------------------------------------------------------------------------|-------------------------------|
+| `ZetaHttpClient_getAsync/postAsync/putAsync/patchAsync/deleteAsync/headAsync/optionsAsync` | Performs the async HTTP call  |
+
+Failure: `onError(message)` is invoked instead of `onSuccess`.
+
+**WebSocket:**
+
+| Function                        | Returns on failure | Description                        |
+|---------------------------------|--------------------|------------------------------------|
+| `ZetaSdk_WSSession_create`      | no-op              | Opens a session via an HTTP client |
+| `ZetaSdk_Client_ws`             | no-op              | Opens a session via the client     |
+| `ZetaSdk_WSSession_close`       | no-op              | Closes a session                   |
+| `ZetaSdk_WSSession_receiveNext` | `NULL`             | Reads next message                 |
+| `ZetaSdk_WSSession_sendText`    | no-op              | Sends a text frame                 |
+| `ZetaSdk_WSSession_sendBinary`  | no-op              | Sends a binary frame               |
+| `ZetaSdk_WSMessage_destroy`     | no-op              | Frees a message                    |
+
+Message types: `WS_TEXT`, `WS_BINARY`, `WS_CLOSE`.
+
 
 ### ZetaHttpClientBuilder
 

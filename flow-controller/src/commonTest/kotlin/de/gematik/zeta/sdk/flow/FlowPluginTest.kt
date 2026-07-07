@@ -25,6 +25,7 @@
 package de.gematik.zeta.sdk.flow
 
 import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -47,7 +48,7 @@ class FlowPluginSuccessTest {
         val storage = InMemoryStorage()
         val fo = FlowOrchestrator(listOf())
         val ctx = FlowContextImpl(
-            "",
+            ResourceScope("", emptyList()),
             { error("not in scope of the test") },
             storage = storage,
         )

@@ -126,7 +126,7 @@ class EnsureAccessTokenHandler(
 
     private suspend fun fetchToken(ctx: FlowContext): Result<TokenWithDpop> {
         return try {
-            val dpopKey = tpmProvider.generateDpopKey(ctx.resource)
+            val dpopKey = tpmProvider.generateDpopKey()
             val (authToken, tokenTime) = measureTimedValue { getAuthToken(ctx, dpopKey.jwk.kid) }
             Log.i { "[ENSURE-AUTH-TIMING] getAuthToken=$tokenTime" }
 
@@ -192,24 +192,28 @@ class EnsureAccessTokenHandler(
     private suspend fun buildAccessTokenParams(ctx: FlowContext): AccessTokenParamsWithEndpoints {
         val start = TimeSource.Monotonic.markNow()
         val (authServer, authServerTime) = measureTimedValue {
-            requireNotNull(ctx.configurationStorage.getAuthServer(ctx.resource)) {
-                "Missing auth server configuration for resource: ${ctx.resource}"
+            requireNotNull(ctx.configurationStorage.getAuthServer()) {
+                "Missing auth server configuration for resource: ${ctx.resourceScope.storageKey}"
             }
         }
         val tokenEndpoint = requireNotBlank(authServer.tokenEndpoint) {
-            "Missing token endpoint for resource: ${ctx.resource}"
+            "Missing token endpoint for resource"
         }
         val nonceEndpoint = requireNotBlank(authServer.nonceEndpoint) {
-            "Missing nonce endpoint for resource: ${ctx.resource}"
+            "Missing nonce endpoint for resource"
         }
         val (clientId, clientIdTime) = measureTimedValue {
-            requireNotBlank(ctx.clientRegistrationStorage.getClientId(authServer.issuer)) {
-                "Missing client_id for resource ${ctx.resource}"
+            requireNotBlank(
+                ctx.clientRegistrationStorage.getClientId(
+                    authServer.registrationEndpoint ?: authServer.issuer,
+                ),
+            ) {
+                "Missing client_id for resource"
             }
         }
 
-        val audience = requireNotBlank(ctx.configurationStorage.getProtectedResource(ctx.resource)?.resource) {
-            "Missing resource value in OPR: $ctx.resource"
+        val audience = requireNotBlank(ctx.configurationStorage.getProtectedResource()?.resource) {
+            "Missing resource value in OPR: ${ctx.resourceScope.storageKey}"
         }
 
         val scopes = authConfig.scopes.ifEmpty { authServer.scopesSupported }
@@ -247,7 +251,7 @@ class EnsureAccessTokenHandler(
 
     /** Helper you can call from ws() to get a valid access token */
     suspend fun getValidAccessToken(ctx: FlowContext): AccessTokenWithDpopKey {
-        val dpopKey = tpmProvider.generateDpopKey(ctx.resource)
+        val dpopKey = tpmProvider.generateDpopKey()
         val token = getAuthToken(ctx, dpopKey.jwk.kid)
         return AccessTokenWithDpopKey(token, dpopKey)
     }

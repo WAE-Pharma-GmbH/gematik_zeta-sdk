@@ -38,6 +38,7 @@ public sealed class ZetaClientConfig
     public Action<string, string?, string>? Logger { get; init; }
     public ZetaLogLevel LogLevel { get; init; } = ZetaLogLevel.Error;
     public SecurityConfig Security { get; init; } = new();
+    public NetworkConfig Network { get; init; } = new();
 }
 
 public sealed class ZetaAuthConfig
@@ -46,7 +47,6 @@ public sealed class ZetaAuthConfig
     public int ExpirySeconds { get; init; } = 30;
     public bool AslProdEnvironment { get; init; } = true;
     public ZetaSmbConfig? Smb { get; init; }
-    public ZetaSmcbConfig? Smcb { get; init; }
     public ICustomSmcbConnector? CustomSmcb { get; init; }
     public required string RequiredRoleOid { get; init; }
 }
@@ -60,20 +60,9 @@ public sealed class ZetaSmbConfig
 
 public class ZetaStorageConfig
 {
-    public string AesB64Key { get; init; }
+    public string? AesB64Key { get; init; }
     public string? StoragePath { get; init; }
     public ICustomStorage? CustomStorage { get; init; }
-}
-
-public sealed class ZetaSmcbConfig
-{
-    public required string BaseUrl        { get; init; }
-    public required string MandantId      { get; init; }
-    public required string ClientSystemId { get; init; }
-    public required string WorkspaceId    { get; init; }
-    public required string UserId         { get; init; }
-    public required string CardHandle     { get; init; }
-    public ICustomSmcbConnector? CustomConnector { get; init; }
 }
 
 public interface ICustomSmcbConnector
@@ -112,4 +101,13 @@ public sealed class SecurityConfig
     public string? AdditionalCaFile { get; init; }
     public bool DisableServerValidation { get; init; }
     public bool SslVerbose { get; init; }
+}
+
+public sealed class NetworkConfig
+{
+    public long ConnectTimeoutMillis { get; init; }
+    public long RequestTimeoutMillis { get; init; }
+    public long SocketTimeoutMillis { get; init; }
+    public int  MaxRetries { get; init; }
+    public bool RetryOnlyIdempotent { get; init; } = true;
 }

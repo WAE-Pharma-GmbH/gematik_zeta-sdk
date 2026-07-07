@@ -26,6 +26,7 @@ package de.gematik.zeta.sdk.flow
 
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpResponse
 import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.http.URLBuilder
 import io.ktor.http.takeFrom
@@ -49,7 +50,7 @@ class RequestEvaluatorImplTest {
         val evaluator = RequestEvaluatorImpl()
 
         // Act
-        val needs = evaluator.evaluate(req, FlowContextImpl("", FakeForwardingClient(), InMemoryStorage()))
+        val needs = evaluator.evaluate(req, FlowContextImpl(ResourceScope("", emptyList()), FakeForwardingClient(), InMemoryStorage()))
 
         // Assert
         assertEquals(emptyList(), needs, "Public paths must not produce pre-send needs")

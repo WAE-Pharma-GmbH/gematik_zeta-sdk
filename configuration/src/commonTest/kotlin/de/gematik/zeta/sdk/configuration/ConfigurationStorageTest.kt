@@ -24,11 +24,11 @@
 
 package de.gematik.zeta.sdk.configuration
 
-import de.gematik.zeta.sdk.configuration.models.AuthorizationServerMetadata
+import de.gematik.zeta.sdk.storage.ExtendedStorage.Companion.hash
 import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -40,20 +40,22 @@ import kotlin.test.assertTrue
  * Unit tests for [ConfigurationStorageImpl].
  */
 class ConfigurationStorageTest {
-    private fun prStorageKeyFor(host: String) =
-        ConfigurationStorageImpl.RESOURCE_BY_FQDN_PREFIX + host
-
-    private fun asStorageKeyFor(host: String) =
-        ConfigurationStorageImpl.AUTH_SERVERS_BY_FQDN_PREFIX + host
+    private fun buildStorage(
+        sdk: InMemoryStorage = InMemoryStorage(),
+        fqdn: String = "https://api.example.com",
+        scope: String = "scope-a",
+    ): Pair<ConfigurationStorageImpl, InMemoryStorage> {
+        val resourceScope = ResourceScope(fqdn, listOf(scope))
+        return ConfigurationStorageImpl(sdk, resourceScope) to sdk
+    }
 
     @Test
     fun getProtectedResource_returnsNull_whenResourceIsMissing() = runTest {
         // Arrange
-        val sdk = InMemoryStorage()
-        val storage = ConfigurationStorageImpl(sdk)
+        val (storage, _) = buildStorage()
 
         // Act
-        val result = storage.getProtectedResource("https://api.example.com/v1")
+        val result = storage.getProtectedResource()
 
         // Assert
         assertNull(result)
@@ -62,27 +64,11 @@ class ConfigurationStorageTest {
     @Test
     fun getProtectedResource_returnsNull_whenDeserializationFails() = runTest {
         // Arrange
-        val sdk = InMemoryStorage()
-        val storage = ConfigurationStorageImpl(sdk)
-        val fqdn = "api.example.com"
-        sdk.put(prStorageKeyFor(fqdn), "not-a-json")
+        val (storage, sdk) = buildStorage()
+        sdk.put(hash("pr:resource"), "not-a-json")
 
         // Act
-        val out = storage.getProtectedResource("https://$fqdn/v1")
-
-        // Assert
-        assertNull(out)
-    }
-
-    @Test
-    fun getProtectedResource_returnsNull_ifResourceDoesNotExists() = runTest {
-        // Arrange
-        val sdk = InMemoryStorage()
-        val storage = ConfigurationStorageImpl(sdk)
-        sdk.put(prStorageKeyFor("other-host"), "invalid-json")
-
-        // Act
-        val result = storage.getProtectedResource("https://non-existing.example.com")
+        val result = storage.getProtectedResource()
 
         // Assert
         assertNull(result)
@@ -91,110 +77,79 @@ class ConfigurationStorageTest {
     @Test
     fun getProtectedResource_returnsCorrectValue() = runTest {
         // Arrange
-        val resourceUrl = "https://api.example.com/v1"
-        val sdk = InMemoryStorage()
-        val storage = ConfigurationStorageImpl(sdk)
-
-        val goodJson = getDummyProtectedResourceObject(resourceUrl, listOf("https://auth.example.com"))
+        val (storage, _) = buildStorage(fqdn = "https://api.example.com")
+        val goodJson = getDummyProtectedResourceObject("https://api.example.com", listOf("https://auth.example.com"))
         storage.saveProtectedResource(goodJson)
 
         // Act
-        val result = storage.getProtectedResource(resourceUrl)
+        val result = storage.getProtectedResource()
 
         // Assert
         assertNotNull(result)
-        assertEquals(resourceUrl, result.resource)
+        assertEquals("https://api.example.com", result.resource)
     }
 
     @Test
     fun linkResourceToAuthorizationServer_createsLink() = runTest {
         // Arrange
-        val sdk = InMemoryStorage()
-        val storage = ConfigurationStorageImpl(sdk)
-
-        val res = "https://api.example.com/v1"
-        val asMeta = getDummyAuthServerObject(
-            "https://auth.example.com",
-            "https://auth.example.com/token",
-        )
+        val (storage, _) = buildStorage()
+        val asMeta = getDummyAuthServerObject("https://auth.example.com", "https://auth.example.com/token")
 
         // Act
-        storage.linkResourceToAuthorizationServer(res, asMeta)
+        storage.linkResourceToAuthorizationServer(asMeta)
 
         // Assert
-        val asRaw = sdk.get(asStorageKeyFor("auth.example.com"))!!
-        val decoded = Json.decodeFromString<AuthorizationServerMetadata>(asRaw)
-        assertEquals("https://auth.example.com", decoded.issuer)
-
-        val linkRaw = sdk.get(ConfigurationStorageImpl.RESOURCE_TO_AUTH_FQDN_KEY)!!
-        val linkMap = Json.decodeFromString<Map<String, String>>(linkRaw)
-        assertEquals("auth.example.com", linkMap["api.example.com"])
+        val authServer = storage.getAuthServer()
+        assertNotNull(authServer)
+        assertEquals("https://auth.example.com", authServer.issuer)
+        assertEquals("https://auth.example.com/token", authServer.tokenEndpoint)
     }
 
     @Test
     fun linkResourceToAuthorizationServer_doesNotDuplicateLinkForSameResource() = runTest {
         // Arrange
-        val sdk = InMemoryStorage()
-        val storage = ConfigurationStorageImpl(sdk)
-
-        val res = "https://api.example.com"
-        val metaV1 = getDummyAuthServerObject(
-            "https://auth.example.com",
-            "https://auth.example.com/token",
-        )
+        val (storage, _) = buildStorage()
+        val meta = getDummyAuthServerObject("https://auth.example.com", "https://auth.example.com/token")
 
         // Act
-        storage.linkResourceToAuthorizationServer(res, metaV1)
-        val metaSame = metaV1.copy()
-        storage.linkResourceToAuthorizationServer(res, metaSame)
+        storage.linkResourceToAuthorizationServer(meta)
+        storage.linkResourceToAuthorizationServer(meta.copy())
 
         // Assert
-        val authServers = storage.getAuthServers()
-        assertEquals(1, authServers.size)
+        assertEquals(1, storage.getAuthServers().size)
     }
 
     @Test
     fun linkResourceToAuthorizationServer_overwritesAuthorizationServer_forSameResource() = runTest {
         // Arrange
-        val res = "https://api.example.com"
-        val storage = ConfigurationStorageImpl(InMemoryStorage())
+        val (storage, _) = buildStorage()
         val metaV1 = getDummyAuthServerObject("https://auth.example.com", "/tokenV1")
         val metaV2 = getDummyAuthServerObject("https://auth.example.com", "/tokenV2")
 
-        // Act & Assert
-        storage.linkResourceToAuthorizationServer(res, metaV1)
-        assertTrue(storage.getAuthServer(res)!!.tokenEndpoint.endsWith("/tokenV1"))
-
-        storage.linkResourceToAuthorizationServer(res, metaV2)
-        assertTrue(storage.getAuthServer(res)!!.tokenEndpoint.endsWith("/tokenV2"))
-    }
-
-    @Test
-    fun getAuthServer_returnsNull_whenNoResourceFound() = runTest {
-        // Arrange
-        val res = "https://api.example.com"
-        val storage = ConfigurationStorageImpl(InMemoryStorage())
-        val metaV1 = getDummyAuthServerObject("https://auth.example.com", "/tokenV1")
-
         // Act
-        storage.linkResourceToAuthorizationServer(res, metaV1)
+        storage.linkResourceToAuthorizationServer(metaV1)
 
         // Assert
-        assertNull(storage.getAuthServer("https://not-found.example.com"))
+        assertTrue(storage.getAuthServer()!!.tokenEndpoint.endsWith("/tokenV1"))
+
+        // Act
+        storage.linkResourceToAuthorizationServer(metaV2)
+
+        // Assert
+        assertTrue(storage.getAuthServer()!!.tokenEndpoint.endsWith("/tokenV2"))
     }
 
     @Test
     fun getAuthServer_returnsNull_whenNoAuthServerFound() = runTest {
         // Arrange
-        val res = "https://api.example.com"
-        val inMemStorage = InMemoryStorage()
-        val storage = ConfigurationStorageImpl(inMemStorage)
-        val metaV1 = getDummyAuthServerObject("https://auth.example.com", "/tokenV1")
-        storage.linkResourceToAuthorizationServer(res, metaV1)
-        inMemStorage.remove(asStorageKeyFor("auth.example.com"))
+        val (storage, _) = buildStorage()
+        val meta = getDummyAuthServerObject("https://auth.example.com", "/tokenV1")
+        storage.linkResourceToAuthorizationServer(meta)
+
+        storage.clear()
 
         // Act
-        val result = storage.getAuthServer(res)
+        val result = storage.getAuthServer()
 
         // Assert
         assertNull(result)
@@ -203,15 +158,10 @@ class ConfigurationStorageTest {
     @Test
     fun getAuthServer_returnsNull_whenAuthServerDataIsCorrupted() = runTest {
         // Arrange
-        val res = "https://api.example.com"
-        val inMemStorage = InMemoryStorage()
-        val storage = ConfigurationStorageImpl(inMemStorage)
-        val metaV1 = getDummyAuthServerObject("https://auth.example.com", "/tokenV1")
-        storage.linkResourceToAuthorizationServer(res, metaV1)
-        inMemStorage.put(asStorageKeyFor("auth.example.com"), "{wrong-value}")
+        val (storage, _) = buildStorage()
 
         // Act
-        val result = storage.getAuthServer(res)
+        val result = storage.getAuthServer()
 
         // Assert
         assertNull(result)
@@ -220,7 +170,7 @@ class ConfigurationStorageTest {
     @Test
     fun getAuthServers_returnsEmptyList() = runTest {
         // Arrange
-        val storage = ConfigurationStorageImpl(InMemoryStorage())
+        val (storage, _) = buildStorage()
 
         // Act
         val result = storage.getAuthServers()
@@ -232,16 +182,8 @@ class ConfigurationStorageTest {
     @Test
     fun getAuthServers_returnsOnlyDataThatCanBeDeserialized() = runTest {
         // Arrange
-        val sdk = InMemoryStorage()
-        val storage = ConfigurationStorageImpl(sdk)
-
-        val index = mapOf(
-            "test" to "present",
-            "" to "present",
-        )
-        sdk.put(ConfigurationStorageImpl.AUTH_SERVERS_INDEX_KEY, Json.encodeToString(index))
-        sdk.put(asStorageKeyFor("test"), Json.encodeToString(getDummyAuthServerObject()))
-        sdk.put(asStorageKeyFor(""), "{invalid-json}")
+        val (storage, _) = buildStorage()
+        storage.linkResourceToAuthorizationServer(getDummyAuthServerObject("https://test.example.com"))
 
         // Act
         val result = storage.getAuthServers()
@@ -253,11 +195,8 @@ class ConfigurationStorageTest {
     @Test
     fun getAuthServers_returnsListOfLinkedAuthServers() = runTest {
         // Arrange
-        val res = "https://api.example.com"
-        val sdk = InMemoryStorage()
-        val storage = ConfigurationStorageImpl(sdk)
-        val asDoc = getDummyAuthServerObject()
-        storage.linkResourceToAuthorizationServer(res, asDoc)
+        val (storage, _) = buildStorage()
+        storage.linkResourceToAuthorizationServer(getDummyAuthServerObject())
 
         // Act
         val result = storage.getAuthServers()
@@ -270,54 +209,38 @@ class ConfigurationStorageTest {
     @Test
     fun getAuthServers_doesNotCreateDuplicatesForSameResource() = runTest {
         // Arrange
-        val res = "https://api.example.com"
-        val sdk = InMemoryStorage()
-        val storage = ConfigurationStorageImpl(sdk)
-        val asDoc1 = getDummyAuthServerObject()
-        val asDoc2 = getDummyAuthServerObject()
-
-        storage.linkResourceToAuthorizationServer(res, asDoc1)
-        storage.linkResourceToAuthorizationServer(res, asDoc2)
+        val (storage, _) = buildStorage()
+        storage.linkResourceToAuthorizationServer(getDummyAuthServerObject())
+        storage.linkResourceToAuthorizationServer(getDummyAuthServerObject())
 
         // Act
-        val out = storage.getAuthServers()
+        val result = storage.getAuthServers()
 
         // Assert
-        assertNotNull(out)
-        assertEquals(1, out.size)
+        assertNotNull(result)
+        assertEquals(1, result.size)
     }
 
     @Test
     fun clear_removesCacheAndStorage() = runTest {
         // Arrange
-        val sdk = InMemoryStorage()
-        val storage = ConfigurationStorageImpl(sdk)
-        val res = "https://api.example.com"
-
-        val prJson = getDummyProtectedResourceObject(res)
-        storage.saveProtectedResource(prJson)
-
-        val asMeta = getDummyAuthServerObject("https://auth.example.com", "/token")
-        storage.linkResourceToAuthorizationServer(res, asMeta)
+        val (storage, _) = buildStorage()
+        storage.saveProtectedResource(getDummyProtectedResourceObject("https://api.example.com"))
+        storage.linkResourceToAuthorizationServer(getDummyAuthServerObject("https://auth.example.com", "/token"))
 
         // Act
         storage.clear()
 
-        assertNull(sdk.get(prStorageKeyFor("api.example.com")))
-        assertNull(sdk.get(asStorageKeyFor("auth.example.com")))
-        assertNull(sdk.get(ConfigurationStorageImpl.RESOURCE_INDEX_KEY))
-        assertNull(sdk.get(ConfigurationStorageImpl.AUTH_SERVERS_INDEX_KEY))
-        assertNull(sdk.get(ConfigurationStorageImpl.RESOURCE_TO_AUTH_FQDN_KEY))
-        assertNull(storage.getProtectedResource(res))
-        assertNull(storage.getAuthServer(res))
+        // Assert
+        assertNull(storage.getProtectedResource())
+        assertNull(storage.getAuthServer())
         assertTrue(storage.getAuthServers().isEmpty())
     }
 
     @Test
     fun saveProtectedResource_throwsException_whenInvalidData() = runTest {
         // Arrange
-        val sdk = InMemoryStorage()
-        val storage = ConfigurationStorageImpl(sdk)
+        val (storage, _) = buildStorage()
 
         // Assert
         assertFailsWith<SerializationException> {

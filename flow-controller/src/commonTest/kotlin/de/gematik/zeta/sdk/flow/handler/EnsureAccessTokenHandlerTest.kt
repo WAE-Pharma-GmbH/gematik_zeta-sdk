@@ -50,6 +50,7 @@ import de.gematik.zeta.sdk.flow.FlowNeed
 import de.gematik.zeta.sdk.flow.getDummyProtectedResourceObject
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpResponse
 import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import de.gematik.zeta.sdk.storage.SdkStorage
 import de.gematik.zeta.sdk.tpm.TpmProvider
 import io.ktor.client.engine.mock.MockEngine
@@ -338,7 +339,7 @@ private class FakeTpmProvider(override val isHardwareBacked: Boolean) : TpmProvi
         return PublicKeyOut(byteArrayOf(1), Jwk("", "", "", "", "", "", ""))
     }
 
-    override suspend fun generateDpopKey(resource: String): PublicKeyOut {
+    override suspend fun generateDpopKey(): PublicKeyOut {
         return PublicKeyOut(byteArrayOf(), Jwk("kid", "EC", "ES256", "sig", "P-256", "x", "y"))
     }
 
@@ -438,13 +439,13 @@ private class FakeForwardingClient : de.gematik.zeta.sdk.flow.ForwardingClient {
 }
 
 class FakeConfigurationStorage : ConfigurationStorage {
-    override suspend fun getProtectedResource(resourceUrl: String): ProtectedResourceMetadata =
-        getDummyProtectedResourceObject(resourceUrl)
+    override suspend fun getProtectedResource(): ProtectedResourceMetadata =
+        getDummyProtectedResourceObject()
     override suspend fun saveProtectedResource(protectedRes: String): ProtectedResourceMetadata =
         error("not in scope")
     override suspend fun getAuthServers(): List<AuthorizationServerMetadata> =
         error("not in scope")
-    override suspend fun getAuthServer(resource: String): AuthorizationServerMetadata =
+    override suspend fun getAuthServer(): AuthorizationServerMetadata =
         AuthorizationServerMetadata(
             issuer = "https://auth.example.com",
             authorizationEndpoint = "",
@@ -464,9 +465,9 @@ class FakeConfigurationStorage : ConfigurationStorage {
             registrationEndpoint = "",
 
         )
-    override suspend fun linkResourceToAuthorizationServer(resource: String, authServerMetadata: AuthorizationServerMetadata) =
+    override suspend fun linkResourceToAuthorizationServer(authServerMetadata: AuthorizationServerMetadata) =
         error("not in scope")
-    override suspend fun aslUse(resource: String): ZetaAslUse = error("not in scope")
+    override suspend fun aslUse(): ZetaAslUse = error("not in scope")
     override suspend fun clear() = error("not in scope")
 }
 
@@ -494,7 +495,7 @@ fun createContext(
     storage: SdkStorage = InMemoryStorage(),
     clientRegistrationStorage: ClientRegistrationStorage = FakeClientRegistrationStorage(),
 ) = FlowContextImpl(
-    resource = "https://resource.example.com",
+    resourceScope = ResourceScope("https://resource.example.com", listOf("scope")),
     client = FakeForwardingClient(),
     storage = storage,
     configurationStorage = FakeConfigurationStorage(),

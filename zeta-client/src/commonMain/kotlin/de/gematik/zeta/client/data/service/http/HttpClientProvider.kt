@@ -30,7 +30,6 @@ import de.gematik.zeta.client.di.DIContainer.CUSTOM_SMCB_ENABLED
 import de.gematik.zeta.client.di.DIContainer.DISABLE_SERVER_VALIDATION
 import de.gematik.zeta.client.di.DIContainer.REQUIRED_OID
 import de.gematik.zeta.client.di.DIContainer.SMB_KEYSTORE_CREDENTIALS
-import de.gematik.zeta.client.di.DIContainer.SMCB_CONNECTOR_CONFIG
 import de.gematik.zeta.client.di.DIContainer.STORAGE_AES_KEY
 import de.gematik.zeta.platform.Platform
 import de.gematik.zeta.platform.platform
@@ -47,7 +46,6 @@ import de.gematik.zeta.sdk.authentication.AuthConfig
 import de.gematik.zeta.sdk.authentication.smb.SmbTokenProvider
 import de.gematik.zeta.sdk.authentication.smcb.CustomConnectorApi
 import de.gematik.zeta.sdk.authentication.smcb.CustomSmcbTokenProvider
-import de.gematik.zeta.sdk.authentication.smcb.SmcbTokenProvider
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClientBuilder
 import de.gematik.zeta.sdk.storage.StorageConfig
@@ -108,9 +106,6 @@ public class HttpClientProviderImpl : HttpClientProvider {
                     when {
                         SMB_KEYSTORE_CREDENTIALS.keystoreFile.isNotEmpty() ->
                             SmbTokenProvider(SMB_KEYSTORE_CREDENTIALS)
-
-                        SMCB_CONNECTOR_CONFIG.baseUrl.isNotEmpty() ->
-                            SmcbTokenProvider(SMCB_CONNECTOR_CONFIG)
 
                         CUSTOM_SMCB_ENABLED ->
                             CustomSmcbTokenProvider(

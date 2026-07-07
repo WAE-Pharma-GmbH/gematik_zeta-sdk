@@ -77,8 +77,8 @@ open class AccessTokenProviderImpl(
 
     override suspend fun getValidToken(tokenEndpoint: String, nonceEndpoint: String, params: AccessTokenParams, dpopKey: String): String {
         val start = TimeSource.Monotonic.markNow()
-        val (cached, cacheReadTime) = measureTimedValue { authStorage.getAccessToken(resource) }
-        val (exp, expReadTime) = measureTimedValue { authStorage.getTokenExpiration(resource) }
+        val (cached, cacheReadTime) = measureTimedValue { authStorage.getAccessToken() }
+        val (exp, expReadTime) = measureTimedValue { authStorage.getTokenExpiration() }
         Log.d { "[AUTH-TIMING] getValidToken cacheRead=$cacheReadTime expRead=$expReadTime" }
 
         if (cached != null && exp != null && exp != "" && exp.toLong() - clock() > SAFETY_MARGIN_SECS) {
@@ -86,7 +86,7 @@ open class AccessTokenProviderImpl(
             return cached
         }
 
-        val (refreshToken, refreshReadTime) = measureTimedValue { authStorage.getRefreshToken(resource) }
+        val (refreshToken, refreshReadTime) = measureTimedValue { authStorage.getRefreshToken() }
         Log.d { "[AUTH-TIMING] getValidToken refreshTokenRead=$refreshReadTime hasRefresh=${!refreshToken.isNullOrBlank()}" }
 
         if (!refreshToken.isNullOrBlank()) {
@@ -188,7 +188,7 @@ open class AccessTokenProviderImpl(
             }
             Log.d { "[AUTH-TIMING][$requestId] requestAccessToken createClientAssertion=$assertionTime" }
 
-            val dpopKey = tpmProvider.generateDpopKey(resource)
+            val dpopKey = tpmProvider.generateDpopKey()
             val (dpop, dpopTime) = measureTimedValue { createDpopToken(dpopKey.jwk, "POST", tokenEndpoint, nonce) }
             Log.d { "[AUTH-TIMING][$requestId] requestAccessToken createDpopToken=$dpopTime" }
 
@@ -217,7 +217,7 @@ open class AccessTokenProviderImpl(
             Log.d { "[AUTH-TIMING][$requestId] requestAccessToken received_http epoch=$recvEpoch httpTime=$httpTime" }
 
             val (_, saveTime) = measureTimedValue {
-                authStorage.saveAccessTokens(resource, resp.accessToken, resp.refreshToken, clock() + resp.expiresIn)
+                authStorage.saveAccessTokens(resp.accessToken, resp.refreshToken, clock() + resp.expiresIn)
             }
             Log.d { "[AUTH-TIMING][$requestId] requestAccessToken saveTokens=$saveTime total=${start.elapsedNow()}" }
 

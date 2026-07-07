@@ -26,6 +26,7 @@ package de.gematik.zeta.sdk.network.http.client
 
 import de.gematik.zeta.logging.Log
 import de.gematik.zeta.sdk.storage.ExtendedStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import de.gematik.zeta.sdk.storage.SdkStorage
 import io.ktor.client.plugins.cookies.AcceptAllCookiesStorage
 import io.ktor.client.plugins.cookies.CookiesStorage
@@ -56,12 +57,12 @@ public class CompositeCookieStorage(
 }
 
 public class SdkCookieStorage(
-    private val storage: SdkStorage,
-    fqdn: String,
+    storage: SdkStorage,
+    resourceScope: ResourceScope,
 ) : CookiesStorage {
     private val mutex = Mutex()
-    private val extendedStorage = ExtendedStorage(storage)
-    private val storageKey = "cookies:${CompositeCookieStorage.ZETA_ROUTE_COOKIE}:${extendedStorage.hash(fqdn)}"
+    private val extendedStorage = ExtendedStorage(storage, resourceScope)
+    private val storageKey = "cookies:${CompositeCookieStorage.ZETA_ROUTE_COOKIE}:${resourceScope.storageKey}"
 
     override suspend fun get(requestUrl: Url): List<Cookie> = mutex.withLock {
         val value = extendedStorage.get(storageKey)
@@ -74,7 +75,11 @@ public class SdkCookieStorage(
         extendedStorage.put(storageKey, cookie.value)
     }
 
-    public suspend fun clearCookie(): Unit = storage.remove(storageKey)
+    public suspend fun clearCookie(): Unit = mutex.withLock {
+        Log.d { "[SDK-COOKIE]: clearing cookie key=$storageKey" }
+        println("[SDK-COOKIE]: clearing cookie key=$storageKey hash=${extendedStorage.hash(storageKey)}")
+        extendedStorage.remove(storageKey)
+    }
 
     override fun close() { /* no-op */ }
 }

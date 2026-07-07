@@ -64,23 +64,23 @@ class AslHandler(
      */
     override suspend fun handle(need: FlowNeed, ctx: FlowContext): CapabilityResult {
         return try {
-            when (ctx.configurationStorage.aslUse(ctx.resource)) {
+            when (ctx.configurationStorage.aslUse()) {
                 ZetaAslUse.REQUIRED -> {
-                    Log.d { "Starting ASL encryption for resource $ctx.resource" }
+                    Log.d { "Starting ASL encryption for resource ${ctx.resourceScope.storageKey}" }
                     CapabilityResult.RetryRequest { req ->
                         asl.encrypt(req)
                     }
                 }
 
                 ZetaAslUse.REQUIRED_PASSTHROUGH -> {
-                    Log.d { "Starting ASL encryption for resource $ctx.resource" }
+                    Log.d { "Starting ASL encryption for resource ${ctx.resourceScope.storageKey}" }
                     return CapabilityResult.RetryRequest { req ->
                         asl.encrypt(req, true)
                     }
                 }
 
                 ZetaAslUse.NOT_SUPPORTED -> {
-                    Log.d { "Resource $ctx.resource does not require ASL" }
+                    Log.d { "Resource ${ctx.resourceScope.storageKey} does not require ASL" }
                     return CapabilityResult.Done
                 }
             }

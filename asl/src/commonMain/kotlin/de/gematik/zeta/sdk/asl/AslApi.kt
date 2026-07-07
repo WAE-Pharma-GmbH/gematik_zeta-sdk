@@ -64,7 +64,7 @@ public class AslApiImpl(
         val extended = session.encryptRequest(innerHttp)
         val bearerHeader = request.headers[HttpHeaders.Authorization]
 
-        aslStorage.saveSession(resource, session)
+        aslStorage.saveSession(session)
 
         requireNotNull(session.cid) { "ASL Session has not been correctly established. CID is missing" }
 
@@ -74,7 +74,7 @@ public class AslApiImpl(
         val hash = accessToken?.let { token ->
             accessTokenProvider.hash(token)
         }
-        val dpopKey = tpmProvider.generateDpopKey(resource)
+        val dpopKey = tpmProvider.generateDpopKey()
         val dpop = accessTokenProvider.createDpopToken(dpopKey.jwk, HttpMethod.Post.value, aslUrl(request.url, session.cid), null, hash)
 
         request.method = HttpMethod.Post
@@ -94,7 +94,7 @@ public class AslApiImpl(
     }
 
     override suspend fun decrypt(extended: ByteArray): ByteArray {
-        val session = aslStorage.getCurrentSession(resource)
+        val session = aslStorage.getCurrentSession()
         requireNotNull(session) { "Decryption failed: The current ASL session could not be obtained" }
 
         return session.decryptResponse(extended)
@@ -102,7 +102,7 @@ public class AslApiImpl(
 
     @OptIn(ExperimentalSerializationApi::class)
     private suspend fun ensureHandshake(request: HttpRequestBuilder): EstablishedSession {
-        aslStorage.getCurrentSession(resource)?.let { return it }
+        aslStorage.getCurrentSession()?.let { return it }
 
         var state = AslHandshakeState.create(zetaHttpClient, request, accessTokenProvider, tpmProvider, tlsValidationEnabled, resource)
         state = state

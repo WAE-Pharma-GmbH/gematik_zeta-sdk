@@ -30,7 +30,6 @@ import io.ktor.websocket.Frame
 import io.ktor.websocket.WebSocketSession
 import io.ktor.websocket.close
 import io.ktor.websocket.readBytes
-import io.ktor.websocket.readText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
@@ -90,19 +89,40 @@ object WsClientAsyncExtension {
 
             messageLoopFuture = scope.future {
                 val listenerJobs = mutableListOf<Job>()
+                val textBuffer = StringBuilder()
+                val binaryBuffer = mutableListOf<ByteArray>()
+
                 try {
                     for (frame in session.incoming) {
                         when (frame) {
                             is Frame.Text -> {
-                                val text = frame.readText()
-                                Log.i { "Received text frame: $text" }
-                                listenerJobs.addAll(notifyListeners { onText(text) })
+                                textBuffer.append(frame.data.decodeToString())
+                                if (frame.fin) {
+                                    val text = textBuffer.toString()
+                                    textBuffer.clear()
+                                    Log.i { "Received text message (${text.length} chars)" }
+                                    listenerJobs.addAll(notifyListeners { onText(text) })
+                                } else {
+                                    Log.i { "Received partial text frame (fin=false), buffering..." }
+                                }
                             }
 
                             is Frame.Binary -> {
-                                val bytes = frame.readBytes()
-                                Log.i { "Received binary frame size: ${bytes.size}" }
-                                listenerJobs.addAll(notifyListeners { onBinary(bytes) })
+                                binaryBuffer.add(frame.readBytes())
+                                if (frame.fin) {
+                                    val totalSize = binaryBuffer.sumOf { it.size }
+                                    val bytes = ByteArray(totalSize)
+                                    var offset = 0
+                                    for (chunk in binaryBuffer) {
+                                        chunk.copyInto(bytes, offset)
+                                        offset += chunk.size
+                                    }
+                                    binaryBuffer.clear()
+                                    Log.i { "Received binary message ($totalSize bytes)" }
+                                    listenerJobs.addAll(notifyListeners { onBinary(bytes) })
+                                } else {
+                                    Log.i { "Received partial binary frame (fin=false), buffering..." }
+                                }
                             }
 
                             is Frame.Close -> {

@@ -67,7 +67,7 @@ fun ZetaSdk_WSSession_create(
     url: CPointer<ByteVar>,
     urlLen: Int,
     handler: CPointer<CFunction<(CPointer<ZetaSdk_WSSession>) -> Unit>>,
-) {
+): Unit = guardExportedFunction(errorValue = Unit) {
     val zetaHttpClient = sdkClient.pointed.zetaHttpClient!!.asStableRef<ZetaHttpClient>().get()
     val targetUrl = url.readBytes(urlLen).decodeToString()
 
@@ -93,7 +93,7 @@ fun ZetaSdk_Client_ws(
     handler: CPointer<CFunction<(CPointer<ZetaSdk_WSSession>) -> Unit>>,
     customHeaders: CPointer<ZetaSdk_HttpHeader>?,
     customHeaderCount: Int,
-) {
+): Unit = guardExportedFunction(errorValue = Unit) {
     val zetaHttpClient = sdkClient.pointed.zetaSdkClient!!.asStableRef<ZetaSdkClient>().get()
     val targetUrl = url.readBytes(urlLen).decodeToString()
     val headers = customHeaders
@@ -116,6 +116,16 @@ fun ZetaSdk_Client_ws(
                     addCaPemFile(file)
                 }
                 globalHttpSecurityConfig.proxyConfig?.let { proxy(it) }
+                globalNetworkConfig?.let { net ->
+                    timeouts(
+                        connectMs = net.connectionTimeoutMillis,
+                        requestMs = net.requestTimeoutMillis,
+                        socketMs = net.socketTimeoutMillis,
+                    )
+                    if (net.maxRetries > 0) {
+                        retry(maxRetries = net.maxRetries, onlyIdempotent = net.retryOnlyIdempotent)
+                    }
+                }
             },
             block = {
                 val cWsSession = nativeHeap.alloc<ZetaSdk_WSSession>().let { cSession ->
@@ -132,7 +142,7 @@ fun ZetaSdk_Client_ws(
 @CName(externName = "ZetaSdk_WSSession_close")
 fun ZetaSdk_WSSession_close(
     wsSession: CPointer<ZetaSdk_WSSession>,
-) {
+): Unit = guardExportedFunction(errorValue = Unit) {
     wsSession.pointed.zetaSdkWsSession!!.asStableRef<DefaultClientWebSocketSession>().let { cSession ->
         cSession.get().let { session ->
             runBlocking {
@@ -147,9 +157,9 @@ fun ZetaSdk_WSSession_close(
 @CName(externName = "ZetaSdk_WSSession_receiveNext")
 fun ZetaSdk_WSSession_receiveNext(
     wsSession: CPointer<ZetaSdk_WSSession>,
-): CPointer<ZetaSdk_WSMessage>? {
+): CPointer<ZetaSdk_WSMessage>? = guardExportedFunction(errorValue = null) {
     val session = wsSession.pointed.zetaSdkWsSession!!.asStableRef<DefaultClientWebSocketSession>().get()
-    return runBlocking {
+    runBlocking {
         for (frame in session.incoming) {
             when (frame) {
                 is Frame.Text -> {
@@ -195,7 +205,7 @@ fun ZetaSdk_WSSession_sendText(
     wsSession: CPointer<ZetaSdk_WSSession>,
     text: CPointer<ByteVar>,
     textLen: Int,
-) {
+): Unit = guardExportedFunction(errorValue = Unit) {
     val session = wsSession.pointed.zetaSdkWsSession!!.asStableRef<DefaultClientWebSocketSession>().get()
     runBlocking {
         val message = text.readBytes(textLen).decodeToString()
@@ -208,7 +218,7 @@ fun ZetaSdk_WSSession_sendBinary(
     wsSession: CPointer<ZetaSdk_WSSession>,
     binary: CPointer<ByteVar>,
     size: Int,
-) {
+): Unit = guardExportedFunction(errorValue = Unit) {
     val session = wsSession.pointed.zetaSdkWsSession!!.asStableRef<DefaultClientWebSocketSession>().get()
     runBlocking {
         session.send(Frame.Binary(true, binary.readBytes(size)))
@@ -218,7 +228,7 @@ fun ZetaSdk_WSSession_sendBinary(
 @CName(externName = "ZetaSdk_WSMessage_destroy")
 fun ZetaSdk_WSMessage_destroy(
     wsMessage: CPointer<ZetaSdk_WSMessage>,
-) {
+): Unit = guardExportedFunction(errorValue = Unit) {
     when (wsMessage.pointed.type) {
         ZetaSdk_WsMessageType.WS_TEXT -> {
             nativeHeap.free(wsMessage.pointed.data.text.text!!.rawValue)

@@ -33,7 +33,7 @@ variables:
 
 include:
   # adds job dependency-check-gradle
-  - component: $CI_SERVER_FQDN/zeta/zeta-ci-cd-components/dependency-check-gradle@v0.4.0
+  - component: $CI_SERVER_FQDN/zeta/zeta-ci-cd-components/dependency-check-gradle@v1.2.2
     inputs:
       cli-bin: ./gradlew
       job-stage: testAndAnalysis

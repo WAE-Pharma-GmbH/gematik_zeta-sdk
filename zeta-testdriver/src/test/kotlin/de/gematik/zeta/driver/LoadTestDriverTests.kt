@@ -25,6 +25,9 @@
 package de.gematik.zeta.driver
 
 import de.gematik.zeta.driver.model.SdkInstance
+import de.gematik.zeta.driver.model.toKtorLogLevel
+import de.gematik.zeta.logging.ZetaLogLevel
+import io.ktor.client.plugins.logging.LogLevel
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
@@ -35,6 +38,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 
 class LoadTestDriverTests {
     private lateinit var manager: FakeLoadInstanceManager
@@ -155,6 +159,38 @@ class LoadTestDriverTests {
 
         // Assert
         assertEquals(emptyList(), removed)
+    }
+
+    @Test
+    fun toKtorLogLevel_debug_mapsToAll() {
+        assertEquals(LogLevel.ALL, ZetaLogLevel.DEBUG.toKtorLogLevel())
+    }
+
+    @Test
+    fun toKtorLogLevel_info_mapsToInfo() {
+        assertEquals(LogLevel.INFO, ZetaLogLevel.INFO.toKtorLogLevel())
+    }
+
+    @Test
+    fun toKtorLogLevel_warn_mapsToInfo() {
+        assertEquals(LogLevel.INFO, ZetaLogLevel.WARN.toKtorLogLevel())
+    }
+
+    @Test
+    fun toKtorLogLevel_error_mapsToNone() {
+        assertEquals(LogLevel.NONE, ZetaLogLevel.ERROR.toKtorLogLevel())
+    }
+
+    @Test
+    fun toKtorLogLevel_none_mapsToNone() {
+        assertEquals(LogLevel.NONE, ZetaLogLevel.NONE.toKtorLogLevel())
+    }
+
+    @Test
+    fun toKtorLogLevel_allValuesAreMapped() {
+        ZetaLogLevel.entries.forEach { level ->
+            assertNotNull(level.toKtorLogLevel())
+        }
     }
 }
 

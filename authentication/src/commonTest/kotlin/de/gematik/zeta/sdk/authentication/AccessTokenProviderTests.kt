@@ -273,7 +273,7 @@ class AccessTokenProviderImplTest {
                 y = "fake-y",
             ),
         )
-        override suspend fun generateDpopKey(resource: String): PublicKeyOut = PublicKeyOut(
+        override suspend fun generateDpopKey(): PublicKeyOut = PublicKeyOut(
             encoded = ByteArray(32) { 0x01 },
             jwk = Jwk(
                 kid = "fake-kid",
@@ -363,11 +363,10 @@ class AccessTokenProviderImplTest {
     ) : AuthenticationStorage {
         val savedTokens = mutableListOf<Triple<String, String, Long>>()
 
-        override suspend fun getAccessToken(fqdn: String): String? = accessToken
-        override suspend fun getRefreshToken(fqdn: String): String? = refreshToken
-        override suspend fun getTokenExpiration(fqdn: String): String? = expiration
+        override suspend fun getAccessToken(): String? = accessToken
+        override suspend fun getRefreshToken(): String? = refreshToken
+        override suspend fun getTokenExpiration(): String? = expiration
         override suspend fun saveAccessTokens(
-            fqdn: String,
             accessToken: String,
             refreshToken: String,
             expiresAt: Long,

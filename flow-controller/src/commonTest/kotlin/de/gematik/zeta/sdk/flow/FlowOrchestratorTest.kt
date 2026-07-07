@@ -31,6 +31,7 @@ import de.gematik.zeta.sdk.flow.handler.ClientRegistrationHandler
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClientBuilder
 import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import de.gematik.zeta.sdk.tpm.TpmProvider
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -120,7 +121,7 @@ class FlowOrchestratorTest {
             // Act
             orchestrator.run(
                 HttpRequestBuilder().apply { url("https://test") },
-                FlowContextImpl("", forwarding, InMemoryStorage()),
+                FlowContextImpl(ResourceScope("", emptyList()), forwarding, InMemoryStorage()),
             )
         }
     }
@@ -209,7 +210,7 @@ class FlowOrchestratorTest {
             return PublicKeyOut(byteArrayOf(1), Jwk("", "", "", "", "", "", ""))
         }
 
-        override suspend fun generateDpopKey(resource: String): PublicKeyOut {
+        override suspend fun generateDpopKey(): PublicKeyOut {
             error("not in scope of the test")
         }
 

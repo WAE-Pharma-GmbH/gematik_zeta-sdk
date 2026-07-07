@@ -41,6 +41,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class AslApiImplTest {
     val fakeTarget = "https://api.example.com/resource/data"
@@ -336,7 +337,7 @@ class AslApiImplTest {
         sut.encrypt(request)
 
         // Assert
-        assertEquals(fakeResource, storage.savedFqdn)
+        assertTrue(storage.sessionWasSaved)
         assertNotNull(storage.savedSession)
     }
 
@@ -450,16 +451,15 @@ class AslApiImplTest {
         assertEquals("DPoP existing-token", target.headers[HttpHeaders.Authorization])
     }
 
-    class FakeAslStorage(private val session: EstablishedSession? = null) : AslStorage {
-        var savedFqdn: String? = null
+    private class FakeAslStorage(val session: EstablishedSession? = null) : AslStorage {
+        var sessionWasSaved = false
         var savedSession: EstablishedSession? = null
 
-        override suspend fun getCurrentSession(fqdn: String): EstablishedSession? = session
-        override suspend fun saveSession(fqdn: String, session: EstablishedSession) {
-            savedFqdn = fqdn
+        override suspend fun getCurrentSession(): EstablishedSession? = session
+        override suspend fun saveSession(session: EstablishedSession) {
+            sessionWasSaved = true
             savedSession = session
         }
-        override suspend fun clear(fqdn: String) {}
         override suspend fun clear() {}
     }
 

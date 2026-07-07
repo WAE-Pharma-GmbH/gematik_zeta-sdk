@@ -149,12 +149,6 @@ int main() {
     char* keystoreFile  = std::getenv("SMB_KEYSTORE_FILE");
     char* alias         = std::getenv("SMB_KEYSTORE_ALIAS");
     char* password      = std::getenv("SMB_KEYSTORE_PASSWORD");
-    char* baseUrl       = std::getenv("SMCB_BASE_URL");
-    char* mandantId     = std::getenv("SMCB_MANDANT_ID");
-    char* clientSystemId = std::getenv("SMCB_CLIENT_SYSTEM_ID");
-    char* workspaceId   = std::getenv("SMCB_WORKSPACE_ID");
-    char* userId        = std::getenv("SMCB_USER_ID");
-    char* cardHandle    = std::getenv("SMCB_CARD_HANDLE");
     char* poppToken     = std::getenv("POPP_TOKEN");
     char* aesB64Key     = std::getenv("STORAGE_AES_KEY");
     char* requiredRoleOid = std::getenv("REQUIRED_ROLE_OID");
@@ -165,7 +159,7 @@ int main() {
     const char* aslProdValue = std::getenv("ASL_PROD");
     bool aslProd = !aslProdValue || strcmp(aslProdValue, "true") == 0;
 
-    const char* scopes[] = {"zero:audience"};
+    char* scopes[] = {"zero:audience"};
 
     ZetaSdk_StorageConfig storageConfig = {
             aesB64Key,
@@ -183,10 +177,13 @@ int main() {
     ZetaSdk_SmcbConfig smcbConfig = {};
 
     ZetaSdk_AuthConfig authConfig = {
-            const_cast<char**>(scopes), ARRAY_SIZE(scopes),
-            30, aslProd,
-            &smbConfig, &smcbConfig,
-            requiredRoleOid
+            .scopes             = scopes,
+            .scopesCount        = ARRAY_SIZE(scopes),
+            .exp                = 30,
+            .aslProdEnvironment = aslProd,
+            .smbConfig          = &smbConfig,
+            .requiredOid        = requiredRoleOid,
+            .smcbConfig         = &smcbConfig,
     };
 
     // Custom log callback
@@ -216,7 +213,7 @@ int main() {
     security.additionalCaPem = const_cast<char**>(caPem);
     security.additionalCaPemCount = 1;
     //security.additionalCaFile = const_cast<char*>(caPemFile);
-    //security.disableServerValidation = disableTls;
+    security.disableServerValidation = disableTls;
     //security.sslVerbose = false;
 
     ZetaSdk_BuildConfig buildConfig = {

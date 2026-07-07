@@ -42,7 +42,7 @@ interface TpmProvider {
      * Returns the DPoP key pair for the given [resource], generating and
      * persisting one if it does not exist yet.
      */
-    suspend fun generateDpopKey(resource: String): PublicKeyOut
+    suspend fun generateDpopKey(): PublicKeyOut
 
     /** Sign a hashed digest using the client instance private key. */
     suspend fun signWithClientKey(input: ByteArray): ByteArray

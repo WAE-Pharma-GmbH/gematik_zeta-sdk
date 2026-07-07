@@ -27,8 +27,11 @@ package de.gematik.zeta.driver.model
 import de.gematik.zeta.driver.DISABLE_SERVER_VALIDATION
 import de.gematik.zeta.driver.newSdk
 import de.gematik.zeta.logging.Log
+import de.gematik.zeta.logging.ZetaLogLevel
 import de.gematik.zeta.sdk.ZetaSdkClient
+import de.gematik.zeta.sdk.ZetaSdkClientImpl
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
+import de.gematik.zeta.sdk.storage.ResourceScope
 import de.gematik.zeta.sdk.storage.SdkStorage
 import io.ktor.client.plugins.logging.LogLevel
 import kotlinx.serialization.Serializable
@@ -43,9 +46,10 @@ public data class SdkInstance(
     var error: String? = null,
 ) {
     internal val client: ZetaSdkClient = newSdk(store, config)
+    val resourceScope: ResourceScope get() = (client as ZetaSdkClientImpl).resourceScope
     val httpClient: ZetaHttpClient by lazy {
         client.httpClient {
-            logging(LogLevel.ALL)
+            logging(Log.logLevel.toKtorLogLevel())
             disableServerValidation(
                 "true".contentEquals((System.getenv(DISABLE_SERVER_VALIDATION) ?: "").lowercase()),
             )
@@ -64,12 +68,6 @@ public data class SdkInstanceConfig(
     public val smbKeystoreB64: String = "",
     public val smbKeystoreAlias: String = "",
     public val smbKeystorePassword: String = "",
-    public val smcbBaseUrl: String = "",
-    public val smcbCardHandle: String = "",
-    public val smcbClientSystemId: String = "",
-    public val smcbMandantId: String = "",
-    public val smcbUserId: String = "",
-    public val smcbWorkspaceId: String = "",
     public val aslProdEnv: Boolean = true,
     public val poppToken: String = "",
     public val disableTlsVerification: Boolean = false,
@@ -84,12 +82,6 @@ public data class SdkInstanceConfig(
                 smbKeystoreB64 = System.getenv("SMB_KEYSTORE_B64") ?: "",
                 smbKeystoreAlias = System.getenv("SMB_KEYSTORE_ALIAS") ?: "",
                 smbKeystorePassword = System.getenv("SMB_KEYSTORE_PASSWORD") ?: "",
-                smcbBaseUrl = System.getenv("SMCB_BASE_URL") ?: "",
-                smcbCardHandle = System.getenv("SMCB_CARD_HANDLE") ?: "",
-                smcbClientSystemId = System.getenv("SMCB_CLIENT_SYSTEM_ID") ?: "",
-                smcbMandantId = System.getenv("SMCB_MANDANT_ID") ?: "",
-                smcbUserId = System.getenv("SMCB_USER_ID") ?: "",
-                smcbWorkspaceId = System.getenv("SMCB_WORKSPACE_ID") ?: "",
                 aslProdEnv = System.getenv("ASL_PROD")?.toBoolean() ?: true,
                 poppToken = System.getenv("POPP_TOKEN") ?: "",
                 disableTlsVerification = "true".contentEquals((System.getenv(DISABLE_SERVER_VALIDATION) ?: "").lowercase()),
@@ -120,12 +112,6 @@ public data class SdkInstanceConfig(
                     smbKeystoreB64 = props.getProperty("SMB_KEYSTORE_B64_1") ?: "",
                     smbKeystoreAlias = props.getProperty("SMB_KEYSTORE_ALIAS_1") ?: "",
                     smbKeystorePassword = props.getProperty("SMB_KEYSTORE_PASSWORD_1") ?: "",
-                    smcbBaseUrl = props.getProperty("SMCB_BASE_URL_1") ?: "",
-                    smcbCardHandle = props.getProperty("SMCB_CARD_HANDLE_1") ?: "",
-                    smcbClientSystemId = props.getProperty("SMCB_CLIENT_SYSTEM_ID_1") ?: "",
-                    smcbMandantId = props.getProperty("SMCB_MANDANT_ID_1") ?: "",
-                    smcbUserId = props.getProperty("SMCB_USER_ID_1") ?: "",
-                    smcbWorkspaceId = props.getProperty("SMCB_WORKSPACE_ID_1") ?: "",
                     aslProdEnv = props.getProperty("ASL_PROD_1")?.toBoolean() ?: true,
                     poppToken = props.getProperty("POPP_TOKEN_1") ?: "",
                     disableTlsVerification = props.getProperty("DISABLE_SERVER_VALIDATION_1")?.toBoolean() ?: false,
@@ -139,9 +125,18 @@ public data class SdkInstanceConfig(
     }
 }
 
+internal fun ZetaLogLevel.toKtorLogLevel(): LogLevel = when (this) {
+    ZetaLogLevel.DEBUG -> LogLevel.ALL
+    ZetaLogLevel.INFO -> LogLevel.INFO
+    ZetaLogLevel.WARN -> LogLevel.INFO
+    ZetaLogLevel.ERROR -> LogLevel.NONE
+    ZetaLogLevel.NONE -> LogLevel.NONE
+}
+
 @Serializable
 public data class CreateInstancesRequest(
     val count: Int? = null,
     val autoInit: Boolean = true,
     val instances: List<SdkInstanceConfig>? = null,
+    val logLevel: ZetaLogLevel? = ZetaLogLevel.DEBUG,
 )

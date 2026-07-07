@@ -30,164 +30,89 @@ import de.gematik.zeta.sdk.configuration.models.ProtectedResourceMetadata
 import de.gematik.zeta.sdk.configuration.models.ZetaAslUse
 import de.gematik.zeta.sdk.network.http.client.hostOf
 import de.gematik.zeta.sdk.storage.ExtendedStorage
+import de.gematik.zeta.sdk.storage.ExtendedStorage.Companion.PRESENT_MARKER
+import de.gematik.zeta.sdk.storage.ResourceScope
 import de.gematik.zeta.sdk.storage.SdkStorage
 import kotlinx.serialization.json.Json
 
-/**
- * Public API for reading/writing configuration metadata in storage.
- */
 interface ConfigurationStorage {
-    /** Returns the protected-resource metadata for the given URL/host, if cached. */
-    suspend fun getProtectedResource(resourceUrl: String): ProtectedResourceMetadata?
-
-    /** Saves a protected-resource well-known JSON and returns the parsed model. */
+    suspend fun getProtectedResource(): ProtectedResourceMetadata?
     suspend fun saveProtectedResource(protectedRes: String): ProtectedResourceMetadata
-
-    /** All cached authorization servers (decoded). */
     suspend fun getAuthServers(): List<AuthorizationServerMetadata>
-
-    /** Returns the authorization server linked to the given resource, if any. */
-    suspend fun getAuthServer(resource: String): AuthorizationServerMetadata?
-
-    /**
-     * Links a resource to an authorization server and stores/updates the AS entry.
-     * The link is resource-FQDN -> auth-FQDN.
-     */
-    suspend fun linkResourceToAuthorizationServer(resource: String, authServerMetadata: AuthorizationServerMetadata)
-
-    suspend fun aslUse(resource: String): ZetaAslUse
-
-    /** Removes all cached metadata. */
+    suspend fun getAuthServer(): AuthorizationServerMetadata?
+    suspend fun linkResourceToAuthorizationServer(authServerMetadata: AuthorizationServerMetadata)
+    suspend fun aslUse(): ZetaAslUse
     suspend fun clear()
 }
 
-/**
- * Default storage implementation backed by [SdkStorage].
- * Uses three maps:
- *  - resource_by_fqdn: resFqdn -> raw PR JSON
- *  - auth_servers_by_fqdn: authFqdn -> raw AS JSON
- *  - resource_to_auth_fqdn: resFqdn -> authFqdn
- */
 class ConfigurationStorageImpl(
-    private val sdkStorage: SdkStorage,
+    sdkStorage: SdkStorage,
+    resourceScope: ResourceScope,
     private val json: Json = Json { ignoreUnknownKeys = true; explicitNulls = false },
 ) : ConfigurationStorage {
-    private val storage = ExtendedStorage(sdkStorage)
+    private val storage = ExtendedStorage(sdkStorage, resourceScope)
 
     companion object {
-        const val RESOURCE_BY_FQDN_PREFIX = "resource_by_fqdn:" // resource_by_fqdn:pep.com
-        const val AUTH_SERVERS_BY_FQDN_PREFIX = "auth_server_by_fqdn:" // auth_server_by_fqdn:auth.pep.com
-
-        const val AUTH_SERVERS_INDEX_KEY = "auth_servers_index"
-        const val RESOURCE_INDEX_KEY = "protected_resource_index" // Map<resFqdn, "present">
-        const val RESOURCE_TO_AUTH_FQDN_KEY = "resource_to_auth_fqdn" // Map<resFqdn, "present">
-        private const val PRESENT_MARKER = "present" // To indicate that the server already has been added
+        const val PR_PREFIX = "pr:"
+        const val AS_PREFIX = "as:"
+        const val PR_INDEX = "pr_index"
+        const val AS_INDEX = "as_index"
+        const val RS_TO_AS = "rs_to_as"
     }
 
-    private fun prKey(resFqdn: String) =
-        "$RESOURCE_BY_FQDN_PREFIX$resFqdn"
-    private fun asKey(authFqdn: String) =
-        "$AUTH_SERVERS_BY_FQDN_PREFIX$authFqdn"
+    private fun prKey() = "${PR_PREFIX}resource"
+    private fun asKey(authFqdn: String) = "$AS_PREFIX$authFqdn"
 
-    /** Reads protected-resource metadata for the given URL/host. */
-    override suspend fun getProtectedResource(resourceUrl: String): ProtectedResourceMetadata? {
-        Log.i { "[ZETA-SDK] resolve host for: $resourceUrl" }
-        val resFqdn = hostOf(resourceUrl)
-
-        Log.i { "[ZETA-SDK] get key for: $resFqdn" }
-        val key = prKey(resFqdn)
-
-        Log.i { "[ZETA-SDK] get key from storage: $key" }
-        val raw = storage.get(key) ?: return null
-
-        Log.i { "[ZETA-SDK] decoding ProtectedResource metadata" }
+    override suspend fun getProtectedResource(): ProtectedResourceMetadata? {
+        Log.i { "[ZETA-SDK] getProtectedResource" }
+        val raw = storage.get(prKey()) ?: return null
         return runCatching { json.decodeFromString<ProtectedResourceMetadata>(raw) }.getOrNull()
     }
 
-    /** Saves raw PR JSON under its FQDN key and returns the parsed model. */
     override suspend fun saveProtectedResource(protectedRes: String): ProtectedResourceMetadata {
         val parsed = runCatching { json.decodeFromString<ProtectedResourceMetadata>(protectedRes) }
             .getOrElse { e ->
-                Log.e { "Failed to parse ProtectedResourceMetadata. Not saving. Reason: ${e.message}" }
+                Log.e { "Failed to parse ProtectedResourceMetadata: ${e.message}" }
                 throw e
             }
-        val resFqdn = hostOf(parsed.resource)
-        storage.put(prKey(resFqdn), protectedRes)
-
-        storage.upsertStringMap(RESOURCE_INDEX_KEY) { index ->
-            if (!index.containsKey(resFqdn)) {
-                index[resFqdn] = PRESENT_MARKER
-            }
-        }
-
+        storage.put(prKey(), protectedRes)
+        storage.upsertStringMap(PR_INDEX) { it["resource"] = PRESENT_MARKER }
         return parsed
     }
 
-    /** Returns all stored authorization servers (decoded). */
     override suspend fun getAuthServers(): List<AuthorizationServerMetadata> {
-        val index = storage.getMap(AUTH_SERVERS_INDEX_KEY) ?: return emptyList()
-
+        val index = storage.getMap(AS_INDEX) ?: return emptyList()
         return index.keys.mapNotNull { authFqdn ->
             val raw = storage.get(asKey(authFqdn)) ?: return@mapNotNull null
             runCatching { json.decodeFromString<AuthorizationServerMetadata>(raw) }.getOrNull()
         }
     }
 
-    /** Resolves resource -> auth FQDN link and returns the AS metadata, if present. */
-    override suspend fun getAuthServer(resource: String): AuthorizationServerMetadata? {
-        val resFqdn = hostOf(resource)
-        val linkMap = storage.getMap(RESOURCE_TO_AUTH_FQDN_KEY) ?: return null
-        val authFqdn = linkMap[resFqdn] ?: return null
-
+    override suspend fun getAuthServer(): AuthorizationServerMetadata? {
+        val authFqdn = storage.getMap(RS_TO_AS)?.get("resource") ?: return null
         val raw = storage.get(asKey(authFqdn)) ?: return null
         return runCatching { json.decodeFromString<AuthorizationServerMetadata>(raw) }.getOrNull()
     }
 
-    /**
-     * Stores/updates the AS entry and writes the resource -> auth link.
-     * Existing entries are updated in place.
-     */
-    override suspend fun linkResourceToAuthorizationServer(resource: String, authServerMetadata: AuthorizationServerMetadata) {
-        val resFqdn = hostOf(resource)
+    override suspend fun linkResourceToAuthorizationServer(authServerMetadata: AuthorizationServerMetadata) {
         val authFqdn = hostOf(authServerMetadata.issuer)
-        val asStorageKey = asKey(authFqdn)
-
         val desired = json.encodeToString(authServerMetadata)
-        val current = storage.get(asStorageKey)
-
-        if (current != desired) {
-            storage.put(asStorageKey, desired)
+        if (storage.get(asKey(authFqdn)) != desired) {
+            storage.put(asKey(authFqdn), desired)
         }
-
-        storage.upsertStringMap(RESOURCE_TO_AUTH_FQDN_KEY) { map -> map[resFqdn] = authFqdn }
-        storage.upsertStringMap(AUTH_SERVERS_INDEX_KEY) { index ->
-            if (!index.containsKey(authFqdn)) {
-                index[authFqdn] = PRESENT_MARKER
-            }
-        }
+        storage.upsertStringMap(RS_TO_AS) { it["resource"] = authFqdn }
+        storage.upsertStringMap(AS_INDEX) { it[authFqdn] = PRESENT_MARKER }
     }
 
-    override suspend fun aslUse(resource: String): ZetaAslUse {
-        val protectedResource = getProtectedResource(resource)
-            ?: error("OPR not found for $resource")
-        return protectedResource.zetaAslUse
-    }
+    override suspend fun aslUse(): ZetaAslUse =
+        getProtectedResource()?.zetaAslUse ?: error("OPR not found")
 
-    /** Removes all maps from persistent storage. */
     override suspend fun clear() {
-        Log.d { "Clearing all configuration caches and persisted maps" }
-        storage.getMap(RESOURCE_INDEX_KEY)
-            ?.keys
-            ?.forEach { resFqdn ->
-                storage.remove(prKey(resFqdn))
-            }
-        storage.remove(RESOURCE_INDEX_KEY)
-        storage.getMap(AUTH_SERVERS_INDEX_KEY)
-            ?.keys
-            ?.forEach { authFqdn ->
-                storage.remove(asKey(authFqdn))
-            }
-        storage.remove(AUTH_SERVERS_INDEX_KEY)
-        storage.remove(RESOURCE_TO_AUTH_FQDN_KEY)
+        Log.d { "Clearing all configuration caches" }
+        storage.remove(prKey())
+        storage.remove(PR_INDEX)
+        storage.getMap(AS_INDEX)?.keys?.forEach { storage.remove(asKey(it)) }
+        storage.remove(AS_INDEX)
+        storage.remove(RS_TO_AS)
     }
 }
