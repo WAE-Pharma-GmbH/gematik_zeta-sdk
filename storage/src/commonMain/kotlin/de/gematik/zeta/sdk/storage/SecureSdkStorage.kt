@@ -24,18 +24,45 @@
 
 package de.gematik.zeta.sdk.storage
 
+import de.gematik.zeta.logging.Log
+
 class SecureSdkStorage(
     private val settings: EncryptedSettings,
     private val secrets: SecretStore?,
+    private val namespace: String = "",
     private val isSensitive: (String) -> Boolean = ::defaultSensitiveKeys,
 ) : SdkStorage {
+    private fun ns(key: String) = if (namespace.isBlank()) key else "$namespace:$key"
+
     override suspend fun put(key: String, value: String) {
-        if (secrets != null && isSensitive(key)) secrets.put(key, value) else settings.putString(key, value)
+        val nsKey = ns(key)
+        Log.d { "[STORAGE] put key=$nsKey" }
+        if (secrets != null && isSensitive(key)) {
+            secrets.put(nsKey, value)
+        } else {
+            settings.putString(nsKey, value)
+        }
     }
-    override suspend fun get(key: String): String? =
-        if (secrets != null && isSensitive(key)) secrets.get(key) else settings.getStringOrNull(key)
+
+    override suspend fun get(key: String): String? {
+        val nsKey = ns(key)
+        val result = if (secrets != null && isSensitive(key)) {
+            secrets.get(nsKey)
+        } else {
+            settings.getStringOrNull(nsKey)
+        }
+        Log.d { "[STORAGE] get key=$nsKey found=${result != null}" }
+        return result
+    }
+
     override suspend fun remove(key: String) {
-        if (secrets != null && isSensitive(key)) secrets.remove(key) else settings.remove(key)
+        val nsKey = ns(key)
+        Log.d { "[STORAGE] remove key=$nsKey" }
+        if (secrets != null && isSensitive(key)) {
+            secrets.remove(nsKey)
+        } else {
+            settings.remove(nsKey)
+        }
     }
     override suspend fun clear() {
         secrets?.clearNamespace()

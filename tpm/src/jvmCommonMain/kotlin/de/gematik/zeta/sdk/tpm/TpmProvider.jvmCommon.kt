@@ -70,21 +70,20 @@ private class SoftwareCryptoProvider(
         return PublicKeyOut(clientKey!!.skpi, jwk)
     }
 
-    override suspend fun generateDpopKey(resource: String): PublicKeyOut {
-        val existing = loadDpopKeysFromStorage(resource)
+    override suspend fun generateDpopKey(): PublicKeyOut {
+        val existing = loadDpopKeysFromStorage()
         val key = if (existing != null) {
             existing
         } else {
             val (generated, genTime) = measureTimedValue { keyPairGenerator.generateKeys() }
-            Log.d { "[CRYPTO-TIMING] generateDpopKeys($resource)=$genTime" }
+            Log.d { "[CRYPTO-TIMING] generateDpopKeys()=$genTime" }
             val (_, saveTime) = measureTimedValue {
                 storage.saveDpopKeys(
-                    resource,
                     toPem("PUBLIC KEY", generated.skpi),
                     toPem("PRIVATE KEY", generated.privateKey),
                 )
             }
-            Log.d { "[CRYPTO-TIMING] saveDpopKeys($resource)=$saveTime" }
+            Log.d { "[CRYPTO-TIMING] saveDpopKeys()=$saveTime" }
             generated
         }
         return PublicKeyOut(key.skpi, keyPairGenerator.toJwk(key.skpi))
@@ -99,7 +98,7 @@ private class SoftwareCryptoProvider(
     }
 
     override suspend fun signWithDpopKey(input: ByteArray, resource: String): ByteArray {
-        val key = checkNotNull(loadDpopKeysFromStorage(resource)) {
+        val key = checkNotNull(loadDpopKeysFromStorage()) {
             "DPoP key not found for resource: $resource"
         }
         val (result, signTime) = measureTimedValue { signForJws(key.privateKey, input) }
@@ -135,16 +134,16 @@ private class SoftwareCryptoProvider(
 
     override suspend fun forget(resource: String?) {
         if (resource != null) {
-            storage.deleteDpopKeys(resource)
+            storage.deleteDpopKeys()
         } else {
             clientKey = null
             storage.deleteAllDpopKeys()
         }
     }
 
-    private suspend fun loadDpopKeysFromStorage(resource: String): KeyPair? {
-        val privRaw = storage.getDpopPrivateKey(resource) ?: return null
-        val pubRaw = storage.getDpopPublicKey(resource) ?: return null
+    private suspend fun loadDpopKeysFromStorage(): KeyPair? {
+        val privRaw = storage.getDpopPrivateKey() ?: return null
+        val pubRaw = storage.getDpopPublicKey() ?: return null
 
         return try {
             keyPairGenerator.loadKeys(
@@ -152,7 +151,7 @@ private class SoftwareCryptoProvider(
                 decodePem(decodeHexPem(pubRaw)),
             )
         } catch (ex: Exception) {
-            Log.d { "Failed to load DPoP keys for $resource: ${ex.message}" }
+            Log.d { "Failed to load DPoP keys for: ${ex.message}" }
             null
         }
     }

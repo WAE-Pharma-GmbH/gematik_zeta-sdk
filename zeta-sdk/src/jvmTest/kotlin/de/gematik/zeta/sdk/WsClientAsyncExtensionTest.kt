@@ -647,6 +647,73 @@ class WsClientAsyncExtensionTest {
     }
 
     @Test
+    fun onMessage_fragmentedTextFrames_reassembledBeforeDelivery() = runTest {
+        // Arrange
+        val fake = FakeWebSocketSession()
+        val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+        val sut = WsAsyncSession(fake, scope)
+
+        val texts = CopyOnWriteArrayList<String>()
+        val listener = testListener(onText = { texts += it })
+        val loopFuture = sut.onMessage(listener)
+
+        // Act
+        fake.incomingCh.send(Frame.Text(fin = false, data = "Hel".encodeToByteArray()))
+        fake.incomingCh.send(Frame.Text(fin = false, data = "lo ".encodeToByteArray()))
+        fake.incomingCh.send(Frame.Text(fin = false, data = "Ze".encodeToByteArray()))
+        fake.incomingCh.send(Frame.Text(fin = true, data = "ta".encodeToByteArray()))
+        fake.incomingCh.send(Frame.Close())
+
+        loopFuture.get(2, TimeUnit.SECONDS)
+
+        // Assert
+        assertEquals(listOf("Hello Zeta"), texts)
+        scope.cancel()
+    }
+
+    @Test
+    fun onMessage_multipleFragmentedMessages_eachReassembledIndependently() = runTest {
+        val fake = FakeWebSocketSession()
+        val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+        val sut = WsAsyncSession(fake, scope)
+
+        val texts = CopyOnWriteArrayList<String>()
+        val loopFuture = sut.onMessage(testListener(onText = { texts += it }))
+
+        fake.incomingCh.send(Frame.Text(fin = false, data = "foo".encodeToByteArray()))
+        fake.incomingCh.send(Frame.Text(fin = true, data = "bar".encodeToByteArray()))
+        fake.incomingCh.send(Frame.Text(fin = false, data = "baz".encodeToByteArray()))
+        fake.incomingCh.send(Frame.Text(fin = true, data = "qux".encodeToByteArray()))
+
+        fake.incomingCh.send(Frame.Close())
+        loopFuture.get(2, TimeUnit.SECONDS)
+
+        assertEquals(listOf("foobar", "bazqux"), texts)
+        scope.cancel()
+    }
+
+    @Test
+    fun onMessage_fragmentedBinaryFrames_reassembledBeforeDelivery() = runTest {
+        val fake = FakeWebSocketSession()
+        val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+        val sut = WsAsyncSession(fake, scope)
+
+        val binaries = CopyOnWriteArrayList<ByteArray>()
+        val loopFuture = sut.onMessage(testListener(onBinary = { binaries += it }))
+
+        fake.incomingCh.send(Frame.Binary(fin = false, data = byteArrayOf(1, 2, 3)))
+        fake.incomingCh.send(Frame.Binary(fin = false, data = byteArrayOf(4, 5)))
+        fake.incomingCh.send(Frame.Binary(fin = true, data = byteArrayOf(6)))
+        fake.incomingCh.send(Frame.Close())
+
+        loopFuture.get(2, TimeUnit.SECONDS)
+
+        assertEquals(1, binaries.size)
+        assertArrayEquals(byteArrayOf(1, 2, 3, 4, 5, 6), binaries[0])
+        scope.cancel()
+    }
+
+    @Test
     @Ignore // NOSONAR ignored until the test is fixed
     fun listenerThrows_doesNotAffectOtherListeners() = runBlocking {
         // Arrange
@@ -677,11 +744,12 @@ class WsClientAsyncExtensionTest {
 
     private fun testListener(
         onText: (String) -> Unit = {},
+        onBinary: (ByteArray) -> Unit = {},
         onClose: () -> Unit = {},
         onError: (Throwable) -> Unit = {},
     ) = object : WsAsyncSession.WsMessageListener {
         override fun onText(text: String) = onText(text)
-        override fun onBinary(data: ByteArray) {}
+        override fun onBinary(data: ByteArray) = onBinary(data)
         override fun onClose() = onClose()
         override fun onError(error: Throwable) = onError(error)
     }

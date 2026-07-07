@@ -180,7 +180,7 @@ public suspend fun AslHandshakeState.applyDpopFor(method: String, targetUrl: Str
     val token = auth.removePrefix(HttpAuthHeaders.Dpop).trim()
 
     val hashed = accessTokenProvider.hash(token)
-    val dpopKey = tpmProvider.generateDpopKey(resource)
+    val dpopKey = tpmProvider.generateDpopKey()
     return accessTokenProvider.createDpopToken(dpopKey.jwk, method, targetUrl, null, hashed)
 }
 

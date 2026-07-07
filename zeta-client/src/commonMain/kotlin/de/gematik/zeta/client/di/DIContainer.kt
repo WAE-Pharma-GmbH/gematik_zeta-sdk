@@ -34,7 +34,6 @@ import de.gematik.zeta.client.data.service.http.HttpClientProvider
 import de.gematik.zeta.client.data.service.http.HttpClientProviderImpl
 import de.gematik.zeta.logging.Log
 import de.gematik.zeta.sdk.authentication.smb.SmbTokenProvider
-import de.gematik.zeta.sdk.authentication.smcb.SmcbTokenProvider
 
 private const val USE_FAKE_SERVICES = false
 internal const val DEBUG_LOGGING = true
@@ -65,15 +64,6 @@ public object DIContainer {
         getConfig("SMB_KEYSTORE_FILE") ?: "",
         getConfig("SMB_KEYSTORE_ALIAS") ?: "",
         getConfig("SMB_KEYSTORE_PASSWORD") ?: "",
-    )
-
-    public val SMCB_CONNECTOR_CONFIG: SmcbTokenProvider.ConnectorConfig = SmcbTokenProvider.ConnectorConfig(
-        getConfig("SMCB_BASE_URL") ?: "",
-        getConfig("SMCB_MANDANT_ID") ?: "",
-        getConfig("SMCB_CLIENT_SYSTEM_ID") ?: "",
-        getConfig("SMCB_WORKSPACE_ID") ?: "",
-        getConfig("SMCB_USER_ID") ?: "",
-        getConfig("SMCB_CARD_HANDLE") ?: "",
     )
 
     public const val CUSTOM_SMCB_ENABLED: Boolean = false

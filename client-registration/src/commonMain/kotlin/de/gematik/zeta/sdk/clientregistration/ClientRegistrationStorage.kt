@@ -26,8 +26,8 @@ package de.gematik.zeta.sdk.clientregistration
 
 import de.gematik.zeta.logging.Log
 import de.gematik.zeta.sdk.clientregistration.model.ClientRegistrationResponse
-import de.gematik.zeta.sdk.network.http.client.hostOf
 import de.gematik.zeta.sdk.storage.ExtendedStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import de.gematik.zeta.sdk.storage.SdkStorage
 import kotlinx.serialization.json.Json
 
@@ -38,42 +38,36 @@ interface ClientRegistrationStorage {
     suspend fun clear()
 }
 
-class ClientRegistrationStorageImpl(private val sdkStorage: SdkStorage) : ClientRegistrationStorage {
+class ClientRegistrationStorageImpl(
+    sdkStorage: SdkStorage,
+    resourceScope: ResourceScope,
+) : ClientRegistrationStorage {
+    private val storage = ExtendedStorage(sdkStorage, resourceScope)
+    private val json = Json { ignoreUnknownKeys = true }
 
-    private val json = Json {
-        ignoreUnknownKeys = true
+    private companion object {
+        const val MAP_KEY = "client_registration_by_auth_server"
     }
-
-    companion object Companion {
-        private const val CLIENT_REGISTRATION_BY_AUTH_SERVER_KEY = "client_registration_by_auth_server"
-    }
-    private val storage = ExtendedStorage(sdkStorage)
 
     override suspend fun saveRegistration(authServer: String, registrationResponse: ClientRegistrationResponse) {
         Log.d { "Saving client registration for AS: $authServer" }
-        val key = hostOf(authServer)
-        val map = storage.getMap(CLIENT_REGISTRATION_BY_AUTH_SERVER_KEY) ?: mutableMapOf()
-        map[key] = json.encodeToString(registrationResponse)
-
-        storage.putMap(CLIENT_REGISTRATION_BY_AUTH_SERVER_KEY, map)
+        storage.upsertStringMap(MAP_KEY) { it[authServer] = json.encodeToString(registrationResponse) }
     }
 
-    override suspend fun getClientId(authServer: String): String? = getRegistrationInfo(authServer)?.clientId
+    override suspend fun getClientId(authServer: String): String? =
+        getRegistrationInfo(authServer)?.clientId
 
     override suspend fun getRegistrationInfo(authServer: String): ClientRegistrationResponse? {
-        val key = hostOf(authServer)
-        val map = storage.getMap(CLIENT_REGISTRATION_BY_AUTH_SERVER_KEY) ?: return null
-        val raw = map[key] ?: return null
-
-        return runCatching {
-            json.decodeFromString<ClientRegistrationResponse>(raw)
-        }
-            .onFailure { e -> Log.e { "Failed to decode registration for $key: ${e.message}" } }
+        if (authServer.isBlank()) return null
+        Log.d { "Getting client registration for AS: $authServer" }
+        val raw = storage.getMap(MAP_KEY)?.get(authServer) ?: return null
+        return runCatching { json.decodeFromString<ClientRegistrationResponse>(raw) }
+            .onFailure { Log.e { "Failed to decode registration for $authServer: ${it.message}" } }
             .getOrNull()
     }
 
     override suspend fun clear() {
         Log.d { "Removing client registration" }
-        storage.remove(CLIENT_REGISTRATION_BY_AUTH_SERVER_KEY)
+        storage.remove(MAP_KEY)
     }
 }

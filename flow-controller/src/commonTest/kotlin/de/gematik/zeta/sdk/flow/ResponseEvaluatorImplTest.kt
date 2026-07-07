@@ -26,6 +26,7 @@ package de.gematik.zeta.sdk.flow
 
 import de.gematik.zeta.sdk.flow.RequestEvaluatorImplTest.FakeForwardingClient
 import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -71,7 +72,7 @@ class ResponseEvaluatorImplTest {
         val resp = responseWith(HttpStatusCode.NotFound)
 
         // Act
-        val directive = evaluator.evaluate(resp.call, FlowContextImpl("", FakeForwardingClient(), storage), FlowOrchestrator.RetryState())
+        val directive = evaluator.evaluate(resp.call, FlowContextImpl(ResourceScope("", emptyList()), FakeForwardingClient(), storage), FlowOrchestrator.RetryState())
 
         // Assert
         assertIs<FlowDirective.Abort>(directive)

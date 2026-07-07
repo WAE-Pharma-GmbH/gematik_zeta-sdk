@@ -30,11 +30,9 @@ import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readBytes
-import io.ktor.websocket.readText
 import kotlinx.coroutines.runBlocking
 
 object WsClientExtension {
-
     @JvmStatic
     fun ws(
         sdk: ZetaSdkClient,
@@ -73,28 +71,31 @@ object WsClientExtension {
         }
 
         fun receiveNext(): WsMessage? = runBlocking {
+            val textBuffer = StringBuilder()
+            val binaryBuffer = mutableListOf<ByteArray>()
+
             for (frame in session.incoming) {
                 when (frame) {
                     is Frame.Text -> {
-                        val text = frame.readText()
-                        return@runBlocking WsMessage.Text(text)
+                        textBuffer.append(frame.data.decodeToString())
+                        if (frame.fin) return@runBlocking WsMessage.Text(textBuffer.toString())
                     }
-
                     is Frame.Binary -> {
-                        val bytes = frame.readBytes()
-                        return@runBlocking WsMessage.Binary(bytes)
+                        binaryBuffer.add(frame.readBytes())
+                        if (frame.fin) return@runBlocking WsMessage.Binary(binaryBuffer.merge())
                     }
-
-                    is Frame.Close -> {
-                        return@runBlocking WsMessage.Close
-                    }
-
-                    else -> {
-                        // ignore other Frames
-                    }
+                    is Frame.Close -> return@runBlocking WsMessage.Close
+                    else -> Unit
                 }
             }
             null
+        }
+
+        private fun List<ByteArray>.merge(): ByteArray {
+            val result = ByteArray(sumOf { it.size })
+            var offset = 0
+            forEach { it.copyInto(result, offset); offset += it.size }
+            return result
         }
 
         fun close() {

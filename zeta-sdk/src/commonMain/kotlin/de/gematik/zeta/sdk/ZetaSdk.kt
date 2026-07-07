@@ -49,7 +49,7 @@ import de.gematik.zeta.sdk.network.http.client.CompositeCookieStorage
 import de.gematik.zeta.sdk.network.http.client.SdkCookieStorage
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClientBuilder
-import de.gematik.zeta.sdk.network.http.client.hostOf
+import de.gematik.zeta.sdk.storage.ResourceScope
 import de.gematik.zeta.sdk.storage.SdkStorage
 import de.gematik.zeta.sdk.storage.StorageConfig
 import de.gematik.zeta.sdk.storage.provideSdkStorage
@@ -85,7 +85,9 @@ object ZetaSdk {
         resource: String,
         config: BuildConfig,
     ): ZetaSdkClient {
-        return ZetaSdkClientImpl(resource, config)
+        val resourceScope = ResourceScope(resource, config.authConfig.scopes)
+        val isolatedConfig = config.withNamespace(resourceScope.storageKey)
+        return ZetaSdkClientImpl(resourceScope, isolatedConfig)
     }
 
     suspend fun ZetaSdkClient.forget(): Result<Unit> = runCatching {
@@ -122,8 +124,8 @@ object ZetaSdk {
     }
 }
 
-private class ZetaSdkClientImpl(
-    private val resource: String,
+class ZetaSdkClientImpl(
+    val resourceScope: ResourceScope,
     private val cfg: BuildConfig,
 ) : ZetaSdkClient {
     private lateinit var mainHttpClient: ZetaHttpClient
@@ -133,13 +135,13 @@ private class ZetaSdkClientImpl(
         is StorageConfig.Custom -> storageConfig.provider
     }
 
-    val sdkCookieStorage = SdkCookieStorage(storage, hostOf(resource))
+    val sdkCookieStorage = SdkCookieStorage(storage, resourceScope)
     private val compositeCookieStorage = CompositeCookieStorage(sdkCookieStorage)
 
     private val httpClientBuilder: ZetaHttpClientBuilder =
         (cfg.httpClientBuilder ?: ZetaHttpClientBuilder())
             .copy(
-                baseUrl = resource,
+                baseUrl = resourceScope.fqdn,
                 cookieStorage = compositeCookieStorage,
             )
 
@@ -156,9 +158,9 @@ private class ZetaSdkClientImpl(
     private var authApiClient: ZetaHttpClient? = null
     private var aslApiClient: ZetaHttpClient? = null
 
-    val flowContext = FlowContextImpl(resource, forwardingClient, storage)
+    val flowContext = FlowContextImpl(resourceScope, forwardingClient, storage)
     private val configHandler: ConfigurationHandler by lazy {
-        ConfigurationHandler(ConfigurationApiImpl(httpClientBuilder), cfg.authConfig)
+        ConfigurationHandler(ConfigurationApiImpl(httpClientBuilder))
     }
     val tpmProvider: TpmProvider = platformDefaultProvider(flowContext.tpmStorage)
     private val clientRegistrationHandler: ClientRegistrationHandler by lazy {
@@ -168,7 +170,7 @@ private class ZetaSdkClientImpl(
     private lateinit var accessTokenProvider: AccessTokenProvider
     private val authHandler: EnsureAccessTokenHandler by lazy {
         accessTokenProvider = AccessTokenProviderImpl(
-            resource,
+            resourceScope.storageKey,
             cfg.authConfig,
             AuthenticationApiImpl(httpClientBuilder.build().also { authApiClient = it }),
             flowContext.authenticationStorage,
@@ -188,7 +190,7 @@ private class ZetaSdkClientImpl(
     private lateinit var aslApi: AslApi
     private val aslHandler: AslHandler by lazy {
         aslApi = AslApiImpl(
-            resource,
+            resourceScope.storageKey,
             cfg.authConfig.aslProdEnvironment,
             cfg.authConfig.requiredRoleOid,
             flowContext.aslStorage,
@@ -247,7 +249,7 @@ private class ZetaSdkClientImpl(
      */
     override fun httpClient(builder: ZetaHttpClientBuilder.() -> Unit): ZetaHttpClient {
         val orchestrator = newOrchestrator()
-        mainHttpClient = ZetaHttpClientBuilder(resource, cookieStorage = sdkCookieStorage)
+        mainHttpClient = ZetaHttpClientBuilder(resourceScope.fqdn, cookieStorage = sdkCookieStorage)
             .apply(builder)
             .build(addExtras = {
                 install(aslDecryptionPlugin(aslApi, InnerHttpCodecImpl()))
@@ -272,7 +274,7 @@ private class ZetaSdkClientImpl(
         val hashedToken = accessTokenProvider.hash(token)
         val dpop = accessTokenProvider.createDpopToken(dpopKey.jwk, "GET", targetUrl, null, hashedToken)
 
-        val wsClient = ZetaHttpClientBuilder(resource, cookieStorage = sdkCookieStorage)
+        val wsClient = ZetaHttpClientBuilder(resourceScope.fqdn, cookieStorage = sdkCookieStorage)
             .apply(builder)
             .build()
 
@@ -290,29 +292,25 @@ private class ZetaSdkClientImpl(
     }
 
     override suspend fun status(): Result<SdkStatus> = runCatching {
-        val resource = flowContext.resource
-
-        val authServer = flowContext.configurationStorage.getAuthServer(resource)
+        val authServer = flowContext.configurationStorage.getAuthServer()
             ?: return@runCatching SdkStatus.NOT_REGISTERED
 
-        flowContext.clientRegistrationStorage.getRegistrationInfo(authServer.issuer)
+        val regKey = authServer.registrationEndpoint?.takeIf { it.isNotBlank() } ?: authServer.issuer
+        flowContext.clientRegistrationStorage.getRegistrationInfo(regKey)
             ?: return@runCatching SdkStatus.NOT_REGISTERED
 
         val nowEpoch = System.now().epochSeconds
-        val expiresAtStr = flowContext.authenticationStorage.getTokenExpiration(resource)
-        val expiresAt = expiresAtStr?.toLongOrNull() ?: 0L
+        val expiresAt = flowContext.authenticationStorage.getTokenExpiration()?.toLongOrNull() ?: 0L
         val tokensExpired = expiresAt <= nowEpoch
 
-        val accessToken = flowContext.authenticationStorage.getAccessToken(resource)
-        val refreshToken = flowContext.authenticationStorage.getRefreshToken(resource)
+        val accessToken = flowContext.authenticationStorage.getAccessToken()
+        val refreshToken = flowContext.authenticationStorage.getRefreshToken()
 
         when {
             !accessToken.isNullOrBlank() && !refreshToken.isNullOrBlank() && !tokensExpired ->
                 SdkStatus.HAS_ACCESS_AND_REFRESH_TOKEN
-
             !refreshToken.isNullOrBlank() ->
                 SdkStatus.HAS_REFRESH_TOKEN
-
             else ->
                 SdkStatus.REGISTERED_NO_VALID_TOKENS
         }

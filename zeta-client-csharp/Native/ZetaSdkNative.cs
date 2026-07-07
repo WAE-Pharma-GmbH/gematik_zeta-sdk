@@ -139,6 +139,12 @@ internal static partial class ZetaSdkNative
     [LibraryImport(Lib)]
     internal static partial void ZetaSdk_WSMessage_destroy(IntPtr wsMessage);
 
+    [LibraryImport(Lib)]
+    internal static partial IntPtr ZetaSdk_getLastError();
+
+    [LibraryImport(Lib)]
+    internal static partial void ZetaSdk_freeLastError(IntPtr ptr);
+
     static ZetaSdkNative()
     {
       NativeLibrary.SetDllImportResolver(

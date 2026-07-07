@@ -24,6 +24,7 @@
 
 package de.gematik.zeta.sdk.network.http.client
 
+import de.gematik.zeta.logging.Log
 import de.gematik.zeta.sdk.network.http.client.config.ClientConfig
 import de.gematik.zeta.sdk.network.http.client.config.MonitoringConfig
 import de.gematik.zeta.sdk.network.http.client.config.NetworkConfig
@@ -82,13 +83,25 @@ public open class ZetaHttpClientBuilder(
      *
      * @param connectMs Connection timeout in milliseconds (TCP/TLS handshake). `null` = leave unchanged.
      * @param requestMs Overall request timeout in milliseconds (entire call). `null` = leave unchanged.
+     * @param socketMs Overall socket timeout in milliseconds. `null` = leave unchanged.
      * @return This builder for chaining.
      */
-    public fun timeouts(connectMs: Long? = null, requestMs: Long? = null): ZetaHttpClientBuilder = apply {
+    public fun timeouts(connectMs: Long? = null, requestMs: Long? = null, socketMs: Long? = null): ZetaHttpClientBuilder = apply {
         network = network.copy(
             connectionTimeoutMillis = connectMs ?: network.connectionTimeoutMillis,
             requestTimeoutMillis = requestMs ?: network.requestTimeoutMillis,
+            socketTimeoutMillis = socketMs ?: network.socketTimeoutMillis,
         )
+        validateTimeouts(network)
+    }
+
+    private fun validateTimeouts(network: NetworkConfig) {
+        if (network.socketTimeoutMillis < network.requestTimeoutMillis) {
+            Log.w {
+                "ZetaHttpClientBuilder: socketTimeoutMillis (${network.socketTimeoutMillis}ms) is lower than " +
+                    "requestTimeoutMillis (${network.requestTimeoutMillis}ms)"
+            }
+        }
     }
 
     /**

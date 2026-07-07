@@ -380,6 +380,6 @@ class SecureSdkStorageTest {
         isSensitive: (String) -> Boolean = SecureSdkStorage.Companion::defaultSensitiveKeys,
     ): Pair<SecureSdkStorage, FakeSettings> {
         val encryptedSettings = buildEncryptedSettings(fakeSettings)
-        return SecureSdkStorage(encryptedSettings, secrets, isSensitive) to fakeSettings
+        return SecureSdkStorage(encryptedSettings, secrets, "", isSensitive) to fakeSettings
     }
 }

@@ -301,6 +301,16 @@ void my_custom_log(void* ctx, const char* level, const char* tag, const char* me
     std::cout.flush();
 }
 
+bool failIfNull(void* ptr, const char* stage) {
+    if (ptr != nullptr) return true;
+
+    char* err = (char*)ZetaSdk_getLastError();
+    std::cout << stage << " failed: " << (err ? err : "unknown error") << "\n";
+    if (err) free(err);
+
+    return false;
+}
+
 int main() {
     std::cout << "Hello from C++!\n";
     std::cout.flush();
@@ -320,6 +330,7 @@ int main() {
     char* wsBaseUrl = std::getenv("WS_BASE_URL");
     char* wsContextPath = std::getenv("WS_SERVER_CONTEXT_PATH");
     char* poppToken = std::getenv("POPP_TOKEN");
+    char* requiredOid = std::getenv("REQUIRED_ROLE_OID");
 
     char* disableTlsValue = std::getenv("DISABLE_SERVER_VALIDATION");
     bool disableTlsValidation = false;
@@ -365,21 +376,16 @@ int main() {
             alias,
             password
     };
-    ZetaSdk_SmcbConfig smcbConfig = {
-            baseUrl,
-            mandantId,
-            clientSystemId,
-            workspaceId,
-            userId,
-            cardHandle
-    };
+
+    // ZetaSdk_SmcbConfig smcbConfig = { .customSmcb = &smcbVTable };
     ZetaSdk_AuthConfig authConfig = {
-            scopes,
-            ARRAY_SIZE(scopes),
-            30,
-            aslProdEnv,
-            &smbConfig,
-            &smcbConfig
+            .scopes             = scopes,
+            .scopesCount        = ARRAY_SIZE(scopes),
+            .exp                = 30,
+            .aslProdEnvironment = aslProdEnv,
+            .smbConfig          = &smbConfig,
+            .requiredOid        = requiredOid,
+            .smcbConfig         = nullptr,
     };
 
     // Custom log callback
@@ -399,7 +405,7 @@ int main() {
     security.additionalCaPem = const_cast<char**>(caPem);
     security.additionalCaPemCount = 1;
     //security.additionalCaFile = const_cast<char*>(caPemFile);
-    //security.disableServerValidation = disableTls;
+    security.disableServerValidation = disableTlsValidation;
     //security.sslVerbose = false;
 
     ZetaSdk_BuildConfig buildConfig = {
@@ -414,6 +420,8 @@ int main() {
     };
 
     ZetaSdk_Client* zetaSdkClient = (ZetaSdk_Client*)ZetaSdk_buildZetaClient(&buildConfig);
+    if (!failIfNull(zetaSdkClient, "Build")) return 1;
+
     ZetaSdk_HttpClient* zetaHttpClient = (ZetaSdk_HttpClient*)ZetaSdk_buildHttpClient(zetaSdkClient);
 
     runHttpClientSample(zetaHttpClient, poppToken);

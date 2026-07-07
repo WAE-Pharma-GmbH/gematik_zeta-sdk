@@ -25,7 +25,8 @@
 package de.gematik.zeta.logging
 
 public object Log {
-    private var logLevel: ZetaLogLevel = ZetaLogLevel.ERROR
+    public var logLevel: ZetaLogLevel = ZetaLogLevel.ERROR
+        private set
     private var customLogger: ZetaLogger? = null
 
     public fun clearDestinations() {

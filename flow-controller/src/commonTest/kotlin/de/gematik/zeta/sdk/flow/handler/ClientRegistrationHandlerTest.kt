@@ -26,8 +26,6 @@ package de.gematik.zeta.sdk.flow.handler
 
 import Jwk
 import PublicKeyOut
-import de.gematik.zeta.sdk.authentication.AuthConfig
-import de.gematik.zeta.sdk.authentication.smb.SmbTokenProvider
 import de.gematik.zeta.sdk.clientregistration.ClientRegistrationApiImpl
 import de.gematik.zeta.sdk.clientregistration.model.ClientRegistrationResponse
 import de.gematik.zeta.sdk.configuration.ConfigurationStorage
@@ -47,6 +45,7 @@ import de.gematik.zeta.sdk.flow.getDummyProtectedResourceObject
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClientBuilder
 import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import de.gematik.zeta.sdk.tpm.TpmProvider
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -56,7 +55,6 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
-import kotlin.test.Ignore
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -267,14 +265,14 @@ class ClientRegistrationHandlerTest {
         return ClientRegistrationHandler("TestClientName", api, tpm, maxRetries)
     }
 
-    private fun createContext(): FlowContext = FlowContextImpl("test", FakeForwardingClient(), InMemoryStorage(), configurationStorage = FakeConfigurationStorage())
+    private fun createContext(): FlowContext = FlowContextImpl(ResourceScope("test", listOf("test")), FakeForwardingClient(), InMemoryStorage(), configurationStorage = FakeConfigurationStorage())
 
     private class FakeTpmProvider(override val isHardwareBacked: Boolean) : TpmProvider {
         override suspend fun getOrGenerateClientInstancePublicKey(): PublicKeyOut {
             return PublicKeyOut(byteArrayOf(1), Jwk("", "", "", "", "", "", ""))
         }
 
-        override suspend fun generateDpopKey(resource: String): PublicKeyOut {
+        override suspend fun generateDpopKey(): PublicKeyOut {
             error("not in scope of the test")
         }
 
@@ -316,7 +314,7 @@ class ClientRegistrationHandlerTest {
     }
 
     private class FakeConfigurationStorage : ConfigurationStorage {
-        override suspend fun getProtectedResource(resourceUrl: String): ProtectedResourceMetadata? {
+        override suspend fun getProtectedResource(): ProtectedResourceMetadata? {
             error("not in scope of the test")
         }
 
@@ -328,7 +326,7 @@ class ClientRegistrationHandlerTest {
             error("not in scope of the test")
         }
 
-        override suspend fun getAuthServer(resource: String): AuthorizationServerMetadata {
+        override suspend fun getAuthServer(): AuthorizationServerMetadata {
             return AuthorizationServerMetadata(
                 issuer = "issuer",
                 authorizationEndpoint = "",
@@ -349,11 +347,11 @@ class ClientRegistrationHandlerTest {
             )
         }
 
-        override suspend fun linkResourceToAuthorizationServer(resource: String, authServerMetadata: AuthorizationServerMetadata) {
+        override suspend fun linkResourceToAuthorizationServer(authServerMetadata: AuthorizationServerMetadata) {
             error("not in scope of the test")
         }
 
-        override suspend fun aslUse(resource: String): ZetaAslUse {
+        override suspend fun aslUse(): ZetaAslUse {
             error("not in scope of the test")
         }
 
@@ -371,7 +369,7 @@ class ConfigurationHandlerTest {
     @Test
     fun canHandle_onlyConfigurationFiles() {
         // Arrange
-        val h = ConfigurationHandler(FakeApi(), createAuthConfig())
+        val h = ConfigurationHandler(FakeApi())
 
         // Act & Assert
         assertTrue(h.canHandle(FlowNeed.ConfigurationFiles))
@@ -379,7 +377,7 @@ class ConfigurationHandlerTest {
 
     @Test
     fun canHandle_only_for_ConfigurationFiles() {
-        val h = ConfigurationHandler(FakeApi(), createAuthConfig(), FakeValidator())
+        val h = ConfigurationHandler(FakeApi(), FakeValidator())
         assertTrue(h.canHandle(FlowNeed.ConfigurationFiles))
     }
 
@@ -392,8 +390,8 @@ class ConfigurationHandlerTest {
         val ctx = getDummyFlowContext()
         val authServer = getDummyAuthServerObject(resource)
         ctx.configurationStorage.saveProtectedResource(Json.encodeToString(protectedResourceMetadata))
-        ctx.configurationStorage.linkResourceToAuthorizationServer(resource, authServer)
-        val h = ConfigurationHandler(FakeApi(), createAuthConfig(), FakeValidator())
+        ctx.configurationStorage.linkResourceToAuthorizationServer(authServer)
+        val h = ConfigurationHandler(FakeApi(), FakeValidator())
 
         // Act
         val res = h.handle(FlowNeed.ConfigurationFiles, ctx)
@@ -412,7 +410,7 @@ class ConfigurationHandlerTest {
             authJson = mapOf(issuer to Json.encodeToString(getDummyAuthServerObject(issuer))),
         )
 
-        val h = ConfigurationHandler(api, createAuthConfig(), FakeValidator())
+        val h = ConfigurationHandler(api, FakeValidator())
         val ctx = getDummyFlowContext()
         ctx.configurationStorage.saveProtectedResource(Json.encodeToString(protectedResourceMetadata))
 
@@ -434,9 +432,9 @@ class ConfigurationHandlerTest {
             mapOf(resource to Json.encodeToString(getDummyProtectedResourceObject(resource, listOf(issuer)))),
         )
 
-        val h = ConfigurationHandler(api, createAuthConfig(), FakeValidator())
+        val h = ConfigurationHandler(api, FakeValidator())
         val ctx = getDummyFlowContext()
-        ctx.configurationStorage.linkResourceToAuthorizationServer(resource, asMetadata)
+        ctx.configurationStorage.linkResourceToAuthorizationServer(asMetadata)
 
         // Act
         val result = h.handle(FlowNeed.ConfigurationFiles, ctx)
@@ -459,7 +457,7 @@ class ConfigurationHandlerTest {
             ),
             authJson = mapOf(issuer to Json.encodeToString(getDummyAuthServerObject(issuer))),
         )
-        val h = ConfigurationHandler(api, createAuthConfig(), FakeValidator())
+        val h = ConfigurationHandler(api, FakeValidator())
         val ctx = getDummyFlowContext()
 
         // Act
@@ -480,7 +478,7 @@ class ConfigurationHandlerTest {
                     Json.encodeToString(getDummyProtectedResourceObject(resource, emptyList())),
             ),
         )
-        val h = ConfigurationHandler(api, createAuthConfig(), FakeValidator())
+        val h = ConfigurationHandler(api, FakeValidator())
 
         // Act & Assert
         val ex = assertFailsWith<ConfigurationHandler.ConfigurationError.AuthorizationServerMissing> {
@@ -502,7 +500,7 @@ class ConfigurationHandlerTest {
             authJson = mapOf(resource to Json.encodeToString(getDummyAuthServerObject(resource))),
         )
         val validator = FakeValidator(isValid = false)
-        val h = ConfigurationHandler(api, createAuthConfig(), validator)
+        val h = ConfigurationHandler(api, validator)
         val ctx = getDummyFlowContext()
 
         // Act & Assert
@@ -525,7 +523,7 @@ class ConfigurationHandlerTest {
             authJson = mapOf(resource to Json.encodeToString(getDummyAuthServerObject(resource))),
         )
         val validator = FakeValidator(isValid = true, 0, true)
-        val h = ConfigurationHandler(api, createAuthConfig(), validator)
+        val h = ConfigurationHandler(api, validator)
         val ctx = getDummyFlowContext()
 
         // Act & Assert
@@ -545,14 +543,12 @@ class ConfigurationHandlerTest {
             authJson = mapOf(resource to Json.encodeToString(getDummyAuthServerObject(resource))),
         )
         val validator = FakeValidator(isValid = true, 0)
-        val h = ConfigurationHandler(api, createAuthConfig(listOf("missing_scope")), validator)
-        val ctx = getDummyFlowContext()
+        val h = ConfigurationHandler(api, validator)
+        val ctx = getDummyFlowContext("missing_scope")
 
         val ex = assertFailsWith<ConfigurationHandler.ConfigurationError.ScopesNotSupported> {
             h.handle(FlowNeed.ConfigurationFiles, ctx)
         }
         assertTrue(ex.message!!.contains("missing_scope"))
     }
-    private fun createAuthConfig(scopes: List<String> = emptyList()) =
-        AuthConfig(scopes, 300, true, SmbTokenProvider(SmbTokenProvider.Credentials("", "", "")), requiredRoleOid = "1.2.276.0.76.4.261")
 }

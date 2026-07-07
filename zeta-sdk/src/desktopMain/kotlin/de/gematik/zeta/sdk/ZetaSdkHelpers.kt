@@ -39,8 +39,8 @@ import de.gematik.zeta.sdk.authentication.AuthConfig
 import de.gematik.zeta.sdk.authentication.smb.SmbTokenProvider
 import de.gematik.zeta.sdk.authentication.smcb.CustomConnectorApi
 import de.gematik.zeta.sdk.authentication.smcb.CustomSmcbTokenProvider
-import de.gematik.zeta.sdk.authentication.smcb.SmcbTokenProvider
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClientBuilder
+import de.gematik.zeta.sdk.network.http.client.config.NetworkConfig
 import de.gematik.zeta.sdk.network.http.client.config.ProxyConfig
 import de.gematik.zeta.sdk.network.http.client.config.ProxyType
 import de.gematik.zeta.sdk.storage.SdkStorage
@@ -79,11 +79,13 @@ import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import platform.posix.free
+import platform.posix.strdup
 import kotlin.collections.emptyList
 import kotlin.collections.orEmpty
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
 import kotlin.experimental.ExperimentalNativeApi
+import kotlin.native.concurrent.ThreadLocal
 
 data class NativeHttpSecurityConfig(
     val additionalCaPem: List<String> = emptyList(),
@@ -93,17 +95,44 @@ data class NativeHttpSecurityConfig(
     val proxyConfig: ProxyConfig? = null,
 )
 var globalHttpSecurityConfig = NativeHttpSecurityConfig()
+var globalNetworkConfig: NetworkConfig? = null
+
+@ThreadLocal
+private var lastErrorMessage: String? = null
+
+private fun setLastError(e: Throwable) {
+    lastErrorMessage = e.message ?: e.toString()
+    Log.e { "[SDK-EXCEPTION] ${e::class.simpleName}: $lastErrorMessage" }
+}
+
+internal inline fun <T> guardExportedFunction(errorValue: T, block: () -> T): T =
+    try {
+        block()
+    } catch (e: Throwable) {
+        setLastError(e)
+        errorValue
+    }
+
+@CName(externName = "ZetaSdk_getLastError")
+fun ZetaSdk_getLastError(): CPointer<ByteVar>? =
+    lastErrorMessage?.let { strdup(it) }
+
+@CName(externName = "ZetaSdk_freeLastError")
+fun ZetaSdk_freeLastError(ptr: CPointer<ByteVar>?): Unit = guardExportedFunction(Unit) {
+    ptr?.let { free(it) }
+}
 
 @CName(externName = "ZetaSdk_buildZetaClient")
 fun ZetaSdk_buildSdkClient(
     buildConfig: CPointer<ZetaSdk_BuildConfig>,
-): CPointer<ZetaSdk_Client> {
+): CPointer<ZetaSdk_Client>? = guardExportedFunction(errorValue = null) {
     val cBuildConfig = buildConfig.pointed
     val cStorageConfig = cBuildConfig.storageConfig!!.pointed
     val cAuthConfig = cBuildConfig.authConfig!!.pointed
     val cSmbConfig = cAuthConfig.smbConfig?.pointed
     val cSmcbConfig = cAuthConfig.smcbConfig?.pointed
     val cSecurityConfig = cBuildConfig.securityConfig?.pointed
+    val cNetworkConfig = cBuildConfig.networkConfig?.pointed
 
     val additionalCaPem = cSecurityConfig
         ?.additionalCaPem
@@ -126,6 +155,16 @@ fun ZetaSdk_buildSdkClient(
     val sslVerbose = cSecurityConfig
         ?.sslVerbose
         ?: false
+
+    globalNetworkConfig = cNetworkConfig?.let {
+        NetworkConfig(
+            connectionTimeoutMillis = it.connectTimeoutMillis.takeIf { v -> v > 0 } ?: NetworkConfig().connectionTimeoutMillis,
+            requestTimeoutMillis = it.requestTimeoutMillis.takeIf { v -> v > 0 } ?: NetworkConfig().requestTimeoutMillis,
+            socketTimeoutMillis = it.socketTimeoutMillis.takeIf { v -> v > 0 } ?: NetworkConfig().socketTimeoutMillis,
+            maxRetries = it.maxRetries,
+            retryOnlyIdempotent = it.retryOnlyIdempotent,
+        )
+    }
 
     globalHttpSecurityConfig = NativeHttpSecurityConfig(
         additionalCaPem = additionalCaPem,
@@ -173,6 +212,16 @@ fun ZetaSdk_buildSdkClient(
                     }
 
                     globalHttpSecurityConfig.proxyConfig?.let { proxy(it) }
+                    globalNetworkConfig?.let { net ->
+                        timeouts(
+                            connectMs = net.connectionTimeoutMillis,
+                            requestMs = net.requestTimeoutMillis,
+                            socketMs = net.socketTimeoutMillis,
+                        )
+                        if (net.maxRetries > 0) {
+                            retry(maxRetries = net.maxRetries, onlyIdempotent = net.retryOnlyIdempotent)
+                        }
+                    }
                 }
                 .contentNegotiation(true)
                 .logging(LogLevel.ALL),
@@ -180,7 +229,7 @@ fun ZetaSdk_buildSdkClient(
         ),
     )
 
-    return nativeHeap.alloc<ZetaSdk_Client>().let { sdkClient ->
+    nativeHeap.alloc<ZetaSdk_Client>().let { sdkClient ->
         sdkClient.zetaSdkClient = StableRef.create(zetaSdkClient).asCPointer()
         sdkClient.ptr
     }
@@ -254,7 +303,6 @@ private fun buildSubjectTokenProvider(
     cSmcbConfig: interop.ZetaSdk_SmcbConfig?,
 ): de.gematik.zeta.sdk.authentication.SubjectTokenProvider {
     val keystoreFile = cSmbConfig?.keystoreFile?.toKString() ?: ""
-    val baseUrl = cSmcbConfig?.baseUrl?.toKString() ?: ""
 
     return when {
         keystoreFile.isNotEmpty() -> SmbTokenProvider(
@@ -265,16 +313,6 @@ private fun buildSubjectTokenProvider(
             ),
         )
         cSmcbConfig?.customSmcb != null -> buildCustomSmcbProvider(cSmcbConfig.customSmcb!!.pointed)
-        baseUrl.isNotEmpty() -> SmcbTokenProvider(
-            SmcbTokenProvider.ConnectorConfig(
-                baseUrl,
-                cSmcbConfig?.mandantId?.toKString() ?: "",
-                cSmcbConfig?.clientSystemId?.toKString() ?: "",
-                cSmcbConfig?.workspaceId?.toKString() ?: "",
-                cSmcbConfig?.userId?.toKString() ?: "",
-                cSmcbConfig?.cardHandle?.toKString() ?: "",
-            ),
-        )
         else -> error("Should specify SM-B / SMC-B subject token provider")
     }
 }
@@ -325,7 +363,7 @@ private fun buildCustomSmcbProvider(vtable: interop.ZetaSdk_SmcbVTable): CustomS
 @CName(externName = "ZetaSdk_clearZetaClient")
 fun ZetaSdk_clearZetaClient(
     sdkClient: CPointer<ZetaSdk_Client>,
-) {
+): Unit = guardExportedFunction(errorValue = Unit) {
     sdkClient.pointed.let { sdkClient ->
         sdkClient.zetaSdkClient!!.asStableRef<ZetaSdkClient>().dispose()
     }
@@ -335,7 +373,7 @@ fun ZetaSdk_clearZetaClient(
 @CName(externName = "ZetaSdk_buildHttpClient")
 fun ZetaSdk_buildHttpClient(
     sdkClient: CPointer<ZetaSdk_Client>,
-): CPointer<ZetaSdk_HttpClient> {
+): CPointer<ZetaSdk_HttpClient>? = guardExportedFunction(errorValue = null) {
     // asStableRef<>().get() cannot be replaced with [] operator as it is not available on StableRef
     val zetaSdkClient = sdkClient.pointed.zetaSdkClient!!.asStableRef<ZetaSdkClient>().get()
     val zetaHttpClient = zetaSdkClient.httpClient {
@@ -349,8 +387,18 @@ fun ZetaSdk_buildHttpClient(
         }
         contentNegotiation(true)
         globalHttpSecurityConfig.proxyConfig?.let { proxy(it) }
+        globalNetworkConfig?.let { net ->
+            timeouts(
+                connectMs = net.connectionTimeoutMillis,
+                requestMs = net.requestTimeoutMillis,
+                socketMs = net.socketTimeoutMillis,
+            )
+            if (net.maxRetries > 0) {
+                retry(maxRetries = net.maxRetries, onlyIdempotent = net.retryOnlyIdempotent)
+            }
+        }
     }
-    return nativeHeap.alloc<ZetaSdk_HttpClient>().let { httpClient ->
+    nativeHeap.alloc<ZetaSdk_HttpClient>().let { httpClient ->
         httpClient.zetaHttpClient = StableRef.create(zetaHttpClient).asCPointer()
         httpClient.ptr
     }
@@ -359,7 +407,7 @@ fun ZetaSdk_buildHttpClient(
 @CName(externName = "ZetaSdk_clearHttpClient")
 fun ZetaSdk_clearHttpClient(
     httpClient: CPointer<ZetaSdk_HttpClient>,
-) {
+): Unit = guardExportedFunction(errorValue = Unit) {
     httpClient.pointed.let { sdkClient ->
         sdkClient.zetaHttpClient!!.asStableRef<ZetaSdkClient>().dispose()
     }
@@ -369,7 +417,7 @@ fun ZetaSdk_clearHttpClient(
 @CName(externName = "ZetaHttpResponse_destroy")
 fun ZetaHttpResponse_destroy(
     httpResponse: CPointer<ZetaSdk_HttpResponse>,
-) {
+): Unit = guardExportedFunction(errorValue = Unit) {
     httpResponse.pointed.let { httpResponse ->
         httpResponse.body?.let { free(it) }
         httpResponse.error?.let { free(it) }
@@ -382,9 +430,9 @@ fun ZetaHttpResponse_destroy(
 }
 
 @CName(externName = "ZetaSdk_close")
-fun ZetaSdk_close(sdkClient: CPointer<ZetaSdk_Client>): Int {
+fun ZetaSdk_close(sdkClient: CPointer<ZetaSdk_Client>): Int = guardExportedFunction(errorValue = -1) {
     val zetaSdkClient = sdkClient.pointed.zetaSdkClient!!.asStableRef<ZetaSdkClient>().get()
-    return runBlocking {
+    runBlocking {
         zetaSdkClient.close().fold(
             onSuccess = { 0 },
             onFailure = {
@@ -396,9 +444,9 @@ fun ZetaSdk_close(sdkClient: CPointer<ZetaSdk_Client>): Int {
 }
 
 @CName(externName = "ZetaSdk_logout")
-fun ZetaSdk_logout(sdkClient: CPointer<ZetaSdk_Client>): Int {
+fun ZetaSdk_logout(sdkClient: CPointer<ZetaSdk_Client>): Int = guardExportedFunction(errorValue = -1) {
     val zetaSdkClient = sdkClient.pointed.zetaSdkClient!!.asStableRef<ZetaSdkClient>().get()
-    return runBlocking {
+    runBlocking {
         zetaSdkClient.logout().fold(
             onSuccess = { 0 },
             onFailure = {
@@ -410,9 +458,9 @@ fun ZetaSdk_logout(sdkClient: CPointer<ZetaSdk_Client>): Int {
 }
 
 @CName(externName = "ZetaSdk_clearRegistration")
-fun ZetaSdk_clearRegistration(sdkClient: CPointer<ZetaSdk_Client>): Int {
+fun ZetaSdk_clearRegistration(sdkClient: CPointer<ZetaSdk_Client>): Int = guardExportedFunction(errorValue = -1) {
     val zetaSdkClient = sdkClient.pointed.zetaSdkClient!!.asStableRef<ZetaSdkClient>().get()
-    return runBlocking {
+    runBlocking {
         zetaSdkClient.clearRegistration().fold(
             onSuccess = { 0 },
             onFailure = {
@@ -424,9 +472,9 @@ fun ZetaSdk_clearRegistration(sdkClient: CPointer<ZetaSdk_Client>): Int {
 }
 
 @CName(externName = "ZetaSdk_discover")
-fun ZetaSdk_discover(sdkClient: CPointer<ZetaSdk_Client>): Int {
+fun ZetaSdk_discover(sdkClient: CPointer<ZetaSdk_Client>): Int = guardExportedFunction(errorValue = -1) {
     val zetaSdkClient = sdkClient.pointed.zetaSdkClient!!.asStableRef<ZetaSdkClient>().get()
-    return runBlocking {
+    runBlocking {
         zetaSdkClient.discover().fold(
             onSuccess = { 0 },
             onFailure = {
@@ -438,9 +486,9 @@ fun ZetaSdk_discover(sdkClient: CPointer<ZetaSdk_Client>): Int {
 }
 
 @CName(externName = "ZetaSdk_register")
-fun ZetaSdk_register(sdkClient: CPointer<ZetaSdk_Client>): Int {
+fun ZetaSdk_register(sdkClient: CPointer<ZetaSdk_Client>): Int = guardExportedFunction(errorValue = -1) {
     val zetaSdkClient = sdkClient.pointed.zetaSdkClient!!.asStableRef<ZetaSdkClient>().get()
-    return runBlocking {
+    runBlocking {
         zetaSdkClient.register().fold(
             onSuccess = { 0 },
             onFailure = {
@@ -452,9 +500,9 @@ fun ZetaSdk_register(sdkClient: CPointer<ZetaSdk_Client>): Int {
 }
 
 @CName(externName = "ZetaSdk_authenticate")
-fun ZetaSdk_authenticate(sdkClient: CPointer<ZetaSdk_Client>): Int {
+fun ZetaSdk_authenticate(sdkClient: CPointer<ZetaSdk_Client>): Int = guardExportedFunction(errorValue = -1) {
     val zetaSdkClient = sdkClient.pointed.zetaSdkClient!!.asStableRef<ZetaSdkClient>().get()
-    return runBlocking {
+    runBlocking {
         zetaSdkClient.authenticate().fold(
             onSuccess = { 0 },
             onFailure = {
@@ -468,17 +516,17 @@ fun ZetaSdk_authenticate(sdkClient: CPointer<ZetaSdk_Client>): Int {
 @CName(externName = "ZetaSdk_status")
 fun ZetaSdk_status(
     sdkClient: CPointer<ZetaSdk_Client>,
-): Int {
+): Int = guardExportedFunction(errorValue = -1) {
     val zetaSdkClient = sdkClient.pointed.zetaSdkClient!!.asStableRef<ZetaSdkClient>().get()
     val status = runBlocking {
         zetaSdkClient.status().getOrNull()
     }
-    return when (status) {
+    when (status) {
         SdkStatus.NOT_REGISTERED -> 0
         SdkStatus.REGISTERED_NO_VALID_TOKENS -> 1
         SdkStatus.HAS_REFRESH_TOKEN -> 2
         SdkStatus.HAS_ACCESS_AND_REFRESH_TOKEN -> 3
-        null -> -1
+        null -> -2
     }
 }
 

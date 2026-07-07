@@ -24,6 +24,8 @@
 
 package de.gematik.zeta.sdk.storage
 
+import de.gematik.zeta.sdk.storage.ExtendedStorage.Companion.PRESENT_MARKER
+import de.gematik.zeta.sdk.storage.ExtendedStorage.Companion.hash
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -32,7 +34,6 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SdkStorageTest {
-
     @Test
     fun getMap_returnsNull_keyMissing() = runTest {
         // Arrange
@@ -77,7 +78,7 @@ class SdkStorageTest {
     fun getMap_returnsMap_validJson() = runTest {
         // Arrange
         val fakeStorage = FakeSdkStorage()
-        fakeStorage.store["key"] = """{"a":"1","b":"2"}"""
+        fakeStorage.store[hash("key")] = """{"a":"1","b":"2"}"""
         val (sut, _) = buildSut(fakeStorage)
 
         // Act
@@ -93,7 +94,7 @@ class SdkStorageTest {
     fun getMap_returnsMutableMap_canBeModified() = runTest {
         // Arrange
         val fakeStorage = FakeSdkStorage()
-        fakeStorage.store["key"] = """{"a":"1"}"""
+        fakeStorage.store[hash("key")] = """{"a":"1"}"""
         val (sut, _) = buildSut(fakeStorage)
 
         // Act
@@ -116,9 +117,9 @@ class SdkStorageTest {
         sut.putMap("key", map)
 
         // Assert
-        assertNotNull(fakeStorage.store["key"])
-        assertTrue(fakeStorage.store["key"]!!.contains("\"x\""))
-        assertTrue(fakeStorage.store["key"]!!.contains("\"y\""))
+        assertNotNull(fakeStorage.store[hash("key")])
+        assertTrue(fakeStorage.store[hash("key")]!!.contains("\"x\""))
+        assertTrue(fakeStorage.store[hash("key")]!!.contains("\"y\""))
     }
 
     @Test
@@ -156,7 +157,7 @@ class SdkStorageTest {
     fun upsertStringMap_addsEntry_existingMapPreserved() = runTest {
         // Arrange
         val fakeStorage = FakeSdkStorage()
-        fakeStorage.store["key"] = """{"a":"1"}"""
+        fakeStorage.store[hash("key")] = """{"a":"1"}"""
         val (sut, _) = buildSut(fakeStorage)
 
         // Act
@@ -179,14 +180,14 @@ class SdkStorageTest {
         sut.put("key", "value")
 
         // Assert
-        assertEquals("value", fakeStorage.store["key"])
+        assertEquals("value", fakeStorage.store[hash("key")])
     }
 
     @Test
     fun get_delegatesToStorage() = runTest {
         // Arrange
         val fakeStorage = FakeSdkStorage()
-        fakeStorage.store["key"] = "value"
+        fakeStorage.store[hash("key")] = "value"
         val (sut, _) = buildSut(fakeStorage)
 
         // Act
@@ -212,14 +213,14 @@ class SdkStorageTest {
     fun remove_delegatesToStorage() = runTest {
         // Arrange
         val fakeStorage = FakeSdkStorage()
-        fakeStorage.store["key"] = "value"
+        fakeStorage.store[hash("key")] = "value"
         val (sut, _) = buildSut(fakeStorage)
 
         // Act
         sut.remove("key")
 
         // Assert
-        assertNull(fakeStorage.store["key"])
+        assertNull(fakeStorage.store[hash("key")])
     }
 
     @Test
@@ -282,52 +283,58 @@ class SdkStorageTest {
         val (sut, _) = buildSut()
 
         // Act
-        val result = sut.getHashes("index_key")
+        val result = sut.getMap("index_key")
 
         // Assert
-        assertTrue(result.isEmpty())
+        assertNull(result)
     }
 
     @Test
     fun getHashes_returnsList_singleEntry() = runTest {
         // Arrange
         val fakeStorage = FakeSdkStorage()
-        fakeStorage.store["index_key"] = "abc12345"
+        fakeStorage.store[hash("index_key")] = """{"abc12345":"present"}"""
         val (sut, _) = buildSut(fakeStorage)
 
         // Act
-        val result = sut.getHashes("index_key")
+        val result = sut.getMap("index_key")
 
         // Assert
-        assertEquals(listOf("abc12345"), result)
+        assertNotNull(result)
+        assertTrue(result.containsKey("abc12345"))
     }
 
     @Test
     fun getHashes_returnsList_multipleEntries() = runTest {
         // Arrange
         val fakeStorage = FakeSdkStorage()
-        fakeStorage.store["index_key"] = "abc12345;def67890;ghi11111"
+        fakeStorage.store[hash("index_key")] = """{"abc12345":"present","def67890":"present","ghi11111":"present"}"""
         val (sut, _) = buildSut(fakeStorage)
 
         // Act
-        val result = sut.getHashes("index_key")
+        val result = sut.getMap("index_key")
 
         // Assert
-        assertEquals(listOf("abc12345", "def67890", "ghi11111"), result)
+        assertNotNull(result)
+        assertEquals(3, result.size)
+        assertTrue(result.containsKey("abc12345"))
+        assertTrue(result.containsKey("def67890"))
+        assertTrue(result.containsKey("ghi11111"))
     }
 
     @Test
     fun getHashes_filtersBlankEntries() = runTest {
         // Arrange
         val fakeStorage = FakeSdkStorage()
-        fakeStorage.store["index_key"] = "abc12345;;def67890;"
+        fakeStorage.store[hash("index_key")] = """{"abc12345":"present","def67890":"present"}"""
         val (sut, _) = buildSut(fakeStorage)
 
         // Act
-        val result = sut.getHashes("index_key")
+        val result = sut.getMap("index_key")
 
         // Assert
-        assertEquals(listOf("abc12345", "def67890"), result)
+        assertNotNull(result)
+        assertEquals(2, result.size)
     }
 
     @Test
@@ -337,25 +344,28 @@ class SdkStorageTest {
         val (sut, _) = buildSut(fakeStorage)
 
         // Act
-        val hash = sut.registerHash("index_key", "https://example.com")
+        sut.upsertStringMap("index_key") { it["abc12345"] = PRESENT_MARKER }
 
         // Assert
-        val stored = fakeStorage.store["index_key"]
-        assertNotNull(stored)
-        assertTrue(stored.contains(hash))
+        val result = sut.getMap("index_key")
+        assertNotNull(result)
+        assertTrue(result.containsKey("abc12345"))
     }
 
     @Test
     fun registerHash_returnsHash_consistentWithHashFunction() = runTest {
         // Arrange
         val (sut, _) = buildSut()
+        val key = "https://example.com"
 
         // Act
-        val registeredHash = sut.registerHash("index_key", "https://example.com")
-        val directHash = sut.hash("https://example.com")
+        val hash = hash(key)
+        sut.upsertStringMap("index_key") { it[hash] = PRESENT_MARKER }
+        val result = sut.getMap("index_key")
 
         // Assert
-        assertEquals(directHash, registeredHash)
+        assertNotNull(result)
+        assertTrue(result.containsKey(hash))
     }
 
     @Test
@@ -363,14 +373,16 @@ class SdkStorageTest {
         // Arrange
         val fakeStorage = FakeSdkStorage()
         val (sut, _) = buildSut(fakeStorage)
+        val key = "https://example.com"
 
         // Act
-        sut.registerHash("index_key", "https://example.com")
-        sut.registerHash("index_key", "https://example.com")
+        sut.upsertStringMap("index_key") { it[key] = PRESENT_MARKER }
+        sut.upsertStringMap("index_key") { it[key] = PRESENT_MARKER }
 
         // Assert
-        val hashes = sut.getHashes("index_key")
-        assertEquals(1, hashes.size)
+        val result = sut.getMap("index_key")
+        assertNotNull(result)
+        assertEquals(1, result.size)
     }
 
     @Test
@@ -380,12 +392,13 @@ class SdkStorageTest {
         val (sut, _) = buildSut(fakeStorage)
 
         // Act
-        sut.registerHash("index_key", "https://first.com")
-        sut.registerHash("index_key", "https://second.com")
+        sut.upsertStringMap("index_key") { it["https://first.com"] = PRESENT_MARKER }
+        sut.upsertStringMap("index_key") { it["https://second.com"] = PRESENT_MARKER }
 
         // Assert
-        val hashes = sut.getHashes("index_key")
-        assertEquals(2, hashes.size)
+        val result = sut.getMap("index_key")
+        assertNotNull(result)
+        assertEquals(2, result.size)
     }
 
     private fun buildSut(fakeStorage: FakeSdkStorage = FakeSdkStorage()) =

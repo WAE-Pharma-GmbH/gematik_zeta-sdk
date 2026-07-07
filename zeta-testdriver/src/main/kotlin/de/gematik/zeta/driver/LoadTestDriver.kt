@@ -150,6 +150,8 @@ public fun Application.loadTestDriverRouting(
 private fun Route.loadManagementRoutes(instanceManager: LoadInstanceManager) {
     post("/load/create_instances") {
         val request = parseCreateInstancesRequest(call)
+        request.logLevel?.let { Log.setLogLevel(it) }
+
         val result = handleCreateInstances(
             count = request.count ?: 0,
             autoInit = request.autoInit,
@@ -188,7 +190,7 @@ private fun Route.loadDriverApiRoutes(instanceManager: LoadInstanceManager) {
     }
     get("/loaddriver-api/{instanceIndex}/removeAuth") {
         call.withInstance(instanceManager) {
-            AuthenticationStorageImpl(it.store).clear()
+            AuthenticationStorageImpl(it.store, it.resourceScope).clear()
             call.respondText("Authentication removed", ContentType.Application.Json)
         }
     }

@@ -25,7 +25,6 @@
 package de.gematik.zeta.sdk.flow.handler
 
 import de.gematik.zeta.logging.Log
-import de.gematik.zeta.sdk.authentication.AuthConfig
 import de.gematik.zeta.sdk.configuration.ConfigurationApi
 import de.gematik.zeta.sdk.configuration.ConfigurationStorage
 import de.gematik.zeta.sdk.configuration.ServiceDiscoveryException
@@ -38,6 +37,7 @@ import de.gematik.zeta.sdk.flow.CapabilityHandler
 import de.gematik.zeta.sdk.flow.CapabilityResult
 import de.gematik.zeta.sdk.flow.FlowContext
 import de.gematik.zeta.sdk.flow.FlowNeed
+import de.gematik.zeta.sdk.storage.ResourceScope
 import kotlinx.serialization.json.Json
 
 /**
@@ -46,10 +46,8 @@ import kotlinx.serialization.json.Json
  */
 class ConfigurationHandler(
     private val configurationApi: ConfigurationApi,
-    private val authConfig: AuthConfig,
     private val validator: WellKnownSchemaValidation = WellKnownSchemaValidationImpl(),
 ) : CapabilityHandler {
-
     companion object {
         private const val SERVICE_DISCOVERY_ERROR_CODE = "SERVICE_DISCOVERY_ERROR"
     }
@@ -67,21 +65,21 @@ class ConfigurationHandler(
             Log.i { "[SDK-DISCOVER] getting context" }
             val storage = ctx.configurationStorage
 
-            if (isMetadataAvailable(ctx.resource, storage)) {
+            if (isMetadataAvailable(storage)) {
                 Log.i { "[SDK-DISCOVER] metadata is available" }
                 return CapabilityResult.Done
             }
 
             Log.i { "[SDK-DISCOVER] loading protected resource metadata" }
-            val protectedResourceMetadata = getProtectedResource(ctx.resource, storage)
+            val protectedResourceMetadata = getProtectedResource(ctx.resourceScope, storage)
             Log.i { "[SDK-DISCOVER] loading auth server metadata" }
             val authorizationMetadata = getAuthorizationMetadata(protectedResourceMetadata.authorizationServers, storage)
 
             Log.i { "[SDK-DISCOVER] validating scopes" }
-            validateScopes(authConfig.scopes, authorizationMetadata.scopesSupported)
+            validateScopes(ctx.resourceScope.scopes, authorizationMetadata.scopesSupported)
 
             Log.i { "[SDK-DISCOVER] linking resource to auth metadata" }
-            storage.linkResourceToAuthorizationServer(ctx.resource, authorizationMetadata)
+            storage.linkResourceToAuthorizationServer(authorizationMetadata)
 
             Log.i { "[SDK-DISCOVER] DONE" }
             CapabilityResult.Done
@@ -93,9 +91,9 @@ class ConfigurationHandler(
     /**
      * Returns true if both the protected-resource and its auth-server link exist.
      */
-    private suspend fun isMetadataAvailable(resource: String, storage: ConfigurationStorage): Boolean {
-        val hasPr = storage.getProtectedResource(resource) != null
-        val hasAuthLink = storage.getAuthServer(resource) != null
+    private suspend fun isMetadataAvailable(storage: ConfigurationStorage): Boolean {
+        val hasPr = storage.getProtectedResource() != null
+        val hasAuthLink = storage.getAuthServer() != null
         return hasPr && hasAuthLink
     }
 
@@ -103,19 +101,19 @@ class ConfigurationHandler(
      * Loads protected-resource metadata from cache or fetches+validates+saves it.
      */
     private suspend fun getProtectedResource(
-        resourceUrl: String,
+        resourceScope: ResourceScope,
         storage: ConfigurationStorage,
     ): ProtectedResourceMetadata {
-        Log.i { "[ZETA-SDK] call getProtectedResource from storage:  $resourceUrl" }
-        storage.getProtectedResource(resourceUrl)?.let { return it }
+        Log.i { "[ZETA-SDK] call getProtectedResource from storage: ${resourceScope.storageKey}" }
+        storage.getProtectedResource()?.let { return it }
 
-        Log.i { "[ZETA-SDK] call getProtectedResource from api:  $resourceUrl" }
-        val prJson = configurationApi.fetchResourceMetadata(resourceUrl)
+        Log.i { "[ZETA-SDK] call getProtectedResource from api: ${resourceScope.fqdn}" }
+        val prJson = configurationApi.fetchResourceMetadata(resourceScope.fqdn)
 
-        Log.i { "[ZETA-SDK] validate resource metadata for json:  $prJson" }
+        Log.i { "[ZETA-SDK] validate resource metadata" }
         validateOrThrow(WellKnownTypes.RESOURCE_METADATA, prJson, configurationApi.getResourceSchema())
 
-        Log.i { "[ZETA-SDK] persist json:  $prJson" }
+        Log.i { "[ZETA-SDK] persist json" }
         return storage.saveProtectedResource(prJson)
     }
 

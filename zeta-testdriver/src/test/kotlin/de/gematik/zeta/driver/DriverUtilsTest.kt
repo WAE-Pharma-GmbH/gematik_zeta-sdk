@@ -50,12 +50,6 @@ class DriverUtilsTest {
             smbKeystoreAlias = "alias",
             smbKeystorePassword = "password",
             smbKeystoreFile = "",
-            smcbBaseUrl = "",
-            smcbCardHandle = "",
-            smcbClientSystemId = "",
-            smcbMandantId = "",
-            smcbUserId = "",
-            smcbWorkspaceId = "",
             aslProdEnv = false,
             poppToken = "",
             requiredOid = "",
@@ -100,12 +94,6 @@ class DriverUtilsTest {
             smbKeystoreAlias = "alias",
             smbKeystorePassword = "password",
             smbKeystoreFile = "",
-            smcbBaseUrl = "",
-            smcbCardHandle = "",
-            smcbClientSystemId = "",
-            smcbMandantId = "",
-            smcbUserId = "",
-            smcbWorkspaceId = "",
             aslProdEnv = false,
             poppToken = "",
             requiredOid = "",
@@ -127,39 +115,6 @@ class DriverUtilsTest {
             smbKeystoreAlias = "alias",
             smbKeystorePassword = "password",
             smbKeystoreFile = "/path/to/keystore.p12",
-            smcbBaseUrl = "",
-            smcbCardHandle = "",
-            smcbClientSystemId = "",
-            smcbMandantId = "",
-            smcbUserId = "",
-            smcbWorkspaceId = "",
-            aslProdEnv = false,
-            poppToken = "",
-            requiredOid = "",
-        )
-
-        // Act
-        val client = newSdk(InMemoryStorage(), config)
-
-        // Assert
-        assertNotNull(client)
-    }
-
-    @Test
-    fun newSdk_usesSmcbTokenProvider_whenSmcbBaseUrlProvided() {
-        // Arrange
-        val config = SdkInstanceConfig(
-            fachdienstUrl = "https://example.com",
-            smbKeystoreB64 = "",
-            smbKeystoreAlias = "",
-            smbKeystorePassword = "",
-            smbKeystoreFile = "",
-            smcbBaseUrl = "https://smcb.example.com",
-            smcbCardHandle = "handle",
-            smcbClientSystemId = "client-id",
-            smcbMandantId = "mandant-id",
-            smcbUserId = "user-id",
-            smcbWorkspaceId = "workspace-id",
             aslProdEnv = false,
             poppToken = "",
             requiredOid = "",
@@ -181,12 +136,6 @@ class DriverUtilsTest {
             smbKeystoreAlias = "",
             smbKeystorePassword = "",
             smbKeystoreFile = "",
-            smcbBaseUrl = "",
-            smcbCardHandle = "",
-            smcbClientSystemId = "",
-            smcbMandantId = "",
-            smcbUserId = "",
-            smcbWorkspaceId = "",
             aslProdEnv = false,
             poppToken = "",
             requiredOid = "",
@@ -207,12 +156,6 @@ class DriverUtilsTest {
             smbKeystoreAlias = "alias",
             smbKeystorePassword = "password",
             smbKeystoreFile = "",
-            smcbBaseUrl = "",
-            smcbCardHandle = "",
-            smcbClientSystemId = "",
-            smcbMandantId = "",
-            smcbUserId = "",
-            smcbWorkspaceId = "",
             aslProdEnv = false,
             poppToken = "",
             requiredOid = "",

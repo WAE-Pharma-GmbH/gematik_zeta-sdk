@@ -209,20 +209,7 @@ public sealed class ZetaClient : IDisposable
         var (scopesPtr, scopesLen) = mem.StringArray(cfg.Auth.Scopes.ToArray());
 
         var smcbPtr = IntPtr.Zero;
-        if (cfg.Auth.Smcb is { } smcb)
-        {
-            smcbPtr = mem.Struct(new NativeSmcbConfig
-            {
-                baseUrl        = mem.Str(smcb.BaseUrl),
-                mandantId      = mem.Str(smcb.MandantId),
-                clientSystemId = mem.Str(smcb.ClientSystemId),
-                workspaceId    = mem.Str(smcb.WorkspaceId),
-                userId         = mem.Str(smcb.UserId),
-                cardHandle     = mem.Str(smcb.CardHandle),
-                customSmcb     = IntPtr.Zero
-            });
-        }
-        else if (cfg.Auth.CustomSmcb is { } customConnector)
+        if (cfg.Auth.CustomSmcb is { } customConnector)
         {
             _customSmcbHandle = new CustomSmcbHandle(customConnector);
             smcbPtr = mem.Struct(new NativeSmcbConfig
@@ -256,6 +243,19 @@ public sealed class ZetaClient : IDisposable
             sslVerbose = cfg.Security?.SslVerbose ?? false
         });
 
+         var networkPtr = IntPtr.Zero;
+         if (cfg.Network is { } network)
+         {
+             networkPtr = mem.Struct(new NativeNetworkConfig
+             {
+                 connectTimeoutMillis = network.ConnectTimeoutMillis,
+                 requestTimeoutMillis = network.RequestTimeoutMillis,
+                 socketTimeoutMillis  = network.SocketTimeoutMillis,
+                 maxRetries           = network.MaxRetries,
+                 retryOnlyIdempotent  = network.RetryOnlyIdempotent
+             });
+         }
+
         return mem.Struct(new NativeBuildConfig
         {
             resource       = mem.Str(cfg.Resource),
@@ -267,7 +267,8 @@ public sealed class ZetaClient : IDisposable
             authConfig     = auth,
             logVTable      = logVTablePtr,
             proxyConfig    = proxyPtr,
-            securityConfig = securityPtr
+            securityConfig = securityPtr,
+            networkConfig  = networkPtr
         });
     }
 

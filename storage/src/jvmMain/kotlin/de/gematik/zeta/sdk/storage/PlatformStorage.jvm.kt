@@ -42,7 +42,7 @@ actual fun provideSdkStorage(config: StorageConfig.Default): SdkStorage {
     )
 
     val secretStore: SecretStore? = createOsSecretStore(service = "de.gematik.zeta.sdk")
-    return SecureSdkStorage(settings = secureSettings, secrets = secretStore)
+    return SecureSdkStorage(settings = secureSettings, secrets = secretStore, namespace = config.namespace)
 }
 
 fun createOsSecretStore(service: String = "de.gematik.zeta.sdk"): SecretStore? {
@@ -70,7 +70,7 @@ class KeyringSecretStore(private val service: String, private val keyring: Keyri
             val secret = keyring.getPassword(service, name)
             Log.d { "Retrieved secret found for: $name" }
             secret
-        } catch (e: PasswordAccessException) {
+        } catch (_: PasswordAccessException) {
             Log.e { "No secret found for: $name" }
             null
         } catch (ex: Exception) {
@@ -83,7 +83,7 @@ class KeyringSecretStore(private val service: String, private val keyring: Keyri
         return try {
             keyring.deletePassword(service, name)
             Log.d { "Retrieved secret found for: $name" }
-        } catch (e: PasswordAccessException) {
+        } catch (_: PasswordAccessException) {
             Log.e { "No secret found or already deleted for: $name" }
         } catch (ex: Exception) {
             Log.e(ex) { "Failed to delete secret: $name" }

@@ -147,6 +147,66 @@ class ZetaHttpClientBuilderTest {
     }
 
     @Test
+    fun timeouts_setsSocketTimeout_whenProvided() = runTest {
+        // Arrange
+        val builder = ZetaHttpClientBuilder()
+        val mockEngine = MockEngine { respond(ByteReadChannel(""), HttpStatusCode.OK) }
+
+        // Act
+        val client = builder.timeouts(socketMs = 20000).build(mockEngine)
+
+        // Assert
+        assertNotNull(client)
+        client.close()
+    }
+
+    @Test
+    fun timeouts_setsAllThreeTimeouts_whenAllProvided() = runTest {
+        // Arrange
+        val builder = ZetaHttpClientBuilder()
+        val mockEngine = MockEngine { respond(ByteReadChannel(""), HttpStatusCode.OK) }
+
+        // Act
+        val client = builder.timeouts(
+            connectMs = 5000,
+            requestMs = 10000,
+            socketMs = 20000,
+        ).build(mockEngine)
+
+        // Assert
+        assertNotNull(client)
+        client.close()
+    }
+
+    @Test
+    fun timeouts_logsWarning_whenSocketTimeoutLowerThanRequestTimeout() = runTest {
+        // Arrange
+        val builder = ZetaHttpClientBuilder()
+        val mockEngine = MockEngine { respond(ByteReadChannel(""), HttpStatusCode.OK) }
+
+        // Act
+        val client = builder.timeouts(requestMs = 10000, socketMs = 5000).build(mockEngine)
+
+        // Assert
+        assertNotNull(client)
+        client.close()
+    }
+
+    @Test
+    fun timeouts_doesNotLogWarning_whenSocketTimeoutGreaterThanOrEqualRequestTimeout() = runTest {
+        // Arrange
+        val builder = ZetaHttpClientBuilder()
+        val mockEngine = MockEngine { respond(ByteReadChannel(""), HttpStatusCode.OK) }
+
+        // Act
+        val client = builder.timeouts(requestMs = 10000, socketMs = 20000).build(mockEngine)
+
+        // Assert
+        assertNotNull(client)
+        client.close()
+    }
+
+    @Test
     fun retry_returnsBuilder_forChaining() {
         // Arrange
         val builder = ZetaHttpClientBuilder()

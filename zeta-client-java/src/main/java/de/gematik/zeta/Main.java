@@ -31,8 +31,8 @@ import de.gematik.zeta.sdk.attestation.model.PlatformProductId;
 import de.gematik.zeta.sdk.authentication.AuthConfig;
 import de.gematik.zeta.sdk.authentication.SubjectTokenProvider;
 import de.gematik.zeta.sdk.authentication.smb.SmbTokenProvider;
-import de.gematik.zeta.sdk.authentication.smcb.ConnectorApiImpl;
-import de.gematik.zeta.sdk.authentication.smcb.SmcbTokenProvider;
+import de.gematik.zeta.sdk.authentication.smcb.CustomConnectorApi;
+import de.gematik.zeta.sdk.authentication.smcb.CustomSmcbTokenProvider;
 import de.gematik.zeta.sdk.network.http.client.HttpClientExtension;
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient;
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClientBuilder;
@@ -40,6 +40,7 @@ import de.gematik.zeta.sdk.storage.InMemoryStorage;
 import de.gematik.zeta.sdk.storage.StorageConfig;
 import io.ktor.client.plugins.logging.LogLevel;
 import kotlin.Unit;
+import kotlin.coroutines.Continuation;
 import kotlinx.coroutines.JobCancellationException;
 
 import java.io.FileInputStream;
@@ -63,6 +64,8 @@ import static de.gematik.zeta.sdk.WsClientExtensionKt.stompConnectFrame;
 import static de.gematik.zeta.sdk.WsClientExtensionKt.stompSendFrame;
 import static de.gematik.zeta.sdk.WsClientExtensionKt.stompSubscribeFrame;
 
+import org.jetbrains.annotations.NotNull;
+
 /**
  * Demonstration entry point for exercising the SDK against a ZETA environment.
  *
@@ -75,12 +78,6 @@ public class Main {
     public static final String SMB_KEYSTORE_PASSWORD = "SMB_KEYSTORE_PASSWORD";
     public static final String ENVIRONMENTS = "ENVIRONMENTS";
     public static final String FACHDIENST_URL = "FACHDIENST_URL";
-    public static final String SMCB_BASE_URL = "SMCB_BASE_URL";
-    public static final String SMCB_MANDANT_ID = "SMCB_MANDANT_ID";
-    public static final String SMCB_CLIENT_SYSTEM_ID = "SMCB_CLIENT_SYSTEM_ID";
-    public static final String SMCB_WORKSPACE_ID = "SMCB_WORKSPACE_ID";
-    public static final String SMCB_USER_ID = "SMCB_USER_ID";
-    public static final String SMCB_CARD_HANDLE = "SMCB_CARD_HANDLE";
     public static final String DISABLE_SERVER_VALIDATION = "DISABLE_SERVER_VALIDATION";
     public static final String ASL_PROD = "ASL_PROD";
     public static final String POPP_TOKEN = "POPP_TOKEN";
@@ -259,26 +256,53 @@ public class Main {
      * @return SubjectTokenProvider the subject token provider to use
      */
     private static SubjectTokenProvider getTokenProvider(Properties props) {
-
         String keystoreFile = getArg(props, SMB_KEYSTORE_FILE);
+
         if (keystoreFile != null) {
             String alias = getArg(props, SMB_KEYSTORE_ALIAS);
             String password = getArg(props, SMB_KEYSTORE_PASSWORD);
-
             return new SmbTokenProvider(new SmbTokenProvider.Credentials(keystoreFile, alias, password, ""));
         }
-        String connectorUrl = getArg(props, SMCB_BASE_URL);
-        if (connectorUrl != null) {
-            String mandantId = getArg(props, SMCB_MANDANT_ID);
-            String clientSystemId = getArg(props, SMCB_CLIENT_SYSTEM_ID);
-            String workplaceId = getArg(props, SMCB_WORKSPACE_ID);
-            String userId = getArg(props, SMCB_USER_ID);
-            String cartHandle = getArg(props, SMCB_CARD_HANDLE);
 
-            SmcbTokenProvider.ConnectorConfig config = new SmcbTokenProvider.ConnectorConfig(connectorUrl, mandantId, clientSystemId, workplaceId, userId, cartHandle);
-            return new SmcbTokenProvider(config, new ConnectorApiImpl(config, null));
-        }
-        return new SmbTokenProvider(new SmbTokenProvider.Credentials("","","", ""));
+        // Custom SMCB — implement your own certificate retrieval and signing
+        return new CustomSmcbTokenProvider(new CustomConnectorApi() {
+            @Override
+            public Object readCertificate(@NotNull Continuation<? super byte[]> continuation) {
+                try {
+                    // Implement your own certificate retrieval here.
+                    // Return the raw DER-encoded X.509 certificate bytes.
+                    // Example: call your own connector service, HSM, or card reader.
+                    continuation.resumeWith(callKonnektor("/certificateservice"));
+                } catch (Exception e) {
+                    continuation.resumeWith(e);
+                }
+                return Unit.INSTANCE;
+            }
+
+            @Override
+            public Object externalAuthenticate(@NotNull String base64Challenge, @NotNull Continuation<? super byte[]> continuation) {
+                try {
+                    // Implement your own signing here.
+                    // base64Challenge: base64-encoded hash of the token to sign.
+                    // Return the raw DER-encoded ECDSA signature bytes.
+                    // Example: call your HSM or card reader to sign the challenge.
+                    continuation.resumeWith(callKonnektorSign(base64Challenge));
+                } catch (Exception e) {
+                    continuation.resumeWith(e);
+                }
+                return Unit.INSTANCE;
+            }
+
+            private byte[] callKonnektor(String path) { //NO SONAR
+                // implement your connector call
+                throw new UnsupportedOperationException("callKonnektor not implemented");
+            }
+
+            private byte[] callKonnektorSign(String base64Challenge) { //NO SONAR
+                // implement your connector signing call
+                throw new UnsupportedOperationException("callKonnektorSign not implemented");
+            }
+        });
     }
 
     /**

@@ -5,9 +5,11 @@ compileSdk = "36"
 cryptographyCore = "0.5.0"
 javaKeyring = "1.0.4"
 minSdk = "28"
-nettyCodecHttp = "4.2.13.Final"
-nettyCodecHttp2 = "4.2.13.Final"
-nettyTransportNativeEpoll = "4.2.13.Final"
+nettyCodecHttp = "4.2.15.Final"
+nettyCodecHttp2 = "4.2.15.Final"
+nettyHandler = "4.2.15.Final"
+nettyTransportNativeEpoll = "4.2.15.Final"
+nettyTransportNativeKqueue = "4.2.15.Final"
 targetSdk = "36"
 versionCode = "1"
 versionName = "1.0.0"
@@ -100,6 +102,8 @@ androidx-lifecycle-viewmodel-compose = { module = "org.jetbrains.androidx.lifecy
 netty-codec-http = { module = "io.netty:netty-codec-http", version.ref = "nettyCodecHttp" }
 netty-codec-http2 = { module = "io.netty:netty-codec-http2", version.ref = "nettyCodecHttp2" }
 netty-transport-native-epoll = { module = "io.netty:netty-transport-native-epoll", version.ref = "nettyTransportNativeEpoll" }
+netty-transport-native-kqueue = { module = "io.netty:netty-transport-native-kqueue", version.ref = "nettyTransportNativeEpoll" }
+netty-handler = { module = "io.netty:netty-handler", version.ref = "nettyHandler" }
 serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "serialization" }
 serialization-cbor = { module = "org.jetbrains.kotlinx:kotlinx-serialization-cbor", version.ref = "serialization" }
 serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }

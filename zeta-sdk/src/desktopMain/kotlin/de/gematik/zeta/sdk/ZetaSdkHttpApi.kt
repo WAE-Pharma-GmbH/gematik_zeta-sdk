@@ -87,7 +87,7 @@ private fun HttpResponseWrapper.toNative(): CPointer<ZetaSdk_HttpResponse> {
     }.ptr
 }
 
-private fun Exception.toNativeError(): CPointer<ZetaSdk_HttpResponse> {
+private fun Throwable.toNativeError(): CPointer<ZetaSdk_HttpResponse> {
     printStackTrace()
     return nativeHeap.alloc<ZetaSdk_HttpResponse>().apply {
         body = null
@@ -101,7 +101,7 @@ private inline fun executeRequest(
     block: (ZetaHttpClient, ZetaSdk_HttpRequest) -> HttpResponseWrapper,
 ): CPointer<ZetaSdk_HttpResponse>? = try {
     block(httpClient.client(), httpRequest.pointed).toNative()
-} catch (e: Exception) {
+} catch (e: Throwable) {
     e.toNativeError()
 }
 
@@ -113,24 +113,30 @@ private fun executeRequestAsync(
     onError: CPointer<CFunction<(CPointer<ByteVar>?) -> Unit>>,
     block: suspend (ZetaHttpClient, String, String?, Map<String, String>) -> HttpResponseWrapper,
 ) {
-    val client = httpClient.pointed.zetaHttpClient!!.asStableRef<ZetaHttpClient>().get()
-    val req = httpRequest.pointed
+    try {
+        val client = httpClient.pointed.zetaHttpClient!!.asStableRef<ZetaHttpClient>().get()
+        val req = httpRequest.pointed
 
-    val url = req.url?.toKString() ?: ""
-    val body = req.body?.toKString()
-    val headers = req.parseHeaders()
+        val url = req.url?.toKString() ?: ""
+        val body = req.body?.toKString()
+        val headers = req.parseHeaders()
 
-    GlobalScope.launch(Dispatchers.IO) {
-        try {
-            val response = block(client, url, body, headers)
-            val bodyBytes = response.body.encodeToByteArray()
-            memScoped {
-                onSuccess.invoke(response.status, bodyBytes.toCValues().ptr)
+        GlobalScope.launch(Dispatchers.IO) {
+            try {
+                val response = block(client, url, body, headers)
+                val bodyBytes = response.body.encodeToByteArray()
+                memScoped {
+                    onSuccess.invoke(response.status, bodyBytes.toCValues().ptr)
+                }
+            } catch (e: Throwable) {
+                memScoped {
+                    onError.invoke((e.message ?: "unknown").encodeToByteArray().toCValues().ptr)
+                }
             }
-        } catch (e: Exception) {
-            memScoped {
-                onError.invoke((e.message ?: "unknown").encodeToByteArray().toCValues().ptr)
-            }
+        }
+    } catch (e: Throwable) {
+        memScoped {
+            onError.invoke((e.message ?: "unknown").encodeToByteArray().toCValues().ptr)
         }
     }
 }

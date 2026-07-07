@@ -22,11 +22,8 @@
  * #L%
  */
 
-package de.gematik.zeta.sdk.authentication.smcb
+package de.gematik.zeta.sdk.storage
 
-class ConnectorError(
-    val faultCode: String,
-    val faultString: String,
-    message: String,
-    cause: Throwable? = null,
-) : RuntimeException(message, cause)
+data class ResourceScope(val fqdn: String, val scopes: List<String>) {
+    val storageKey: String = "rs:$fqdn:${scopes.sorted().joinToString(" ")}"
+}

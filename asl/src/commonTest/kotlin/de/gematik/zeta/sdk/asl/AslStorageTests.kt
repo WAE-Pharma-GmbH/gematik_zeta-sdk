@@ -24,66 +24,66 @@
 
 package de.gematik.zeta.sdk.asl
 
+import de.gematik.zeta.sdk.storage.ResourceScope
 import de.gematik.zeta.sdk.storage.SdkStorage
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class AslStorageImplTest {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    private val resourceScope = ResourceScope("https://api.example.com/resource", listOf("scope-a"))
+
+    private fun buildSut(
+        storage: FakeSdkStorage = FakeSdkStorage(),
+        scope: ResourceScope = resourceScope,
+    ): Pair<AslStorageImpl, FakeSdkStorage> =
+        AslStorageImpl(storage, scope, json) to storage
 
     @Test
     fun saveSession_storesSerializedSession_validSession() = runTest {
         // Arrange
         val (sut, storage) = buildSut()
-        val fqdn = "https://api.example.com/resource"
         val session = buildSession(requestCounter = 42L, encCounter = 13L)
 
         // Act
-        sut.saveSession(fqdn, session)
+        sut.saveSession(session)
 
         // Assert
         val stored = storage.getAll()
-        val sessionKey = stored.keys.first { it.startsWith("asl_session_by_fqdn") }
-        val storedJson = stored[sessionKey]
-        assertNotNull(storedJson)
+        val sessionKey = stored.keys.first { it.startsWith(AslStorageImpl.PREFIX) }
+        val storedJson = stored[sessionKey] ?: error("Session not found in storage for key: $sessionKey")
         val decoded = json.decodeFromString<EstablishedSession>(storedJson)
         assertEquals(42L, decoded.requestCounter)
         assertEquals(13L, decoded.encCounter)
     }
 
     @Test
-    fun saveSession_usesHashedKey_forSessionStorage() = runTest {
+    fun saveSession_usesStorageKey_forSessionStorage() = runTest {
         // Arrange
         val (sut, storage) = buildSut()
-        val fqdn = "https://api.example.com/resource"
         val session = buildSession()
 
         // Act
-        sut.saveSession(fqdn, session)
+        sut.saveSession(session)
 
         // Assert
-        val stored = storage.getAll()
-        val sessionKeys = stored.keys.filter { it.startsWith("asl_session_by_fqdn") }
+        val sessionKeys = storage.getAll().keys.filter { it.startsWith(AslStorageImpl.PREFIX) }
         assertEquals(1, sessionKeys.size)
-        val sessionKey = sessionKeys.first()
-        assertFalse(sessionKey.contains("example.com"))
+        assertFalse(sessionKeys.first().contains("example.com"))
     }
 
     @Test
     fun getCurrentSession_returnsSession_validStoredSession() = runTest {
         // Arrange
         val (sut, _) = buildSut()
-        val fqdn = "https://api.example.com/resource"
-        val session = buildSession(requestCounter = 99L, encCounter = 77L)
-        sut.saveSession(fqdn, session)
+        sut.saveSession(buildSession(requestCounter = 99L, encCounter = 77L))
 
         // Act
-        val result = sut.getCurrentSession(fqdn)
+        val result = sut.getCurrentSession()
 
         // Assert
         assertEquals(99L, result!!.requestCounter)
@@ -94,27 +94,9 @@ class AslStorageImplTest {
     fun getCurrentSession_returnsNull_noStoredSession() = runTest {
         // Arrange
         val (sut, _) = buildSut()
-        val fqdn = "https://api.example.com/resource"
 
         // Act
-        val result = sut.getCurrentSession(fqdn)
-
-        // Assert
-        assertNull(result)
-    }
-
-    @Test
-    fun getCurrentSession_returnsNull_emptyStoredValue() = runTest {
-        // Arrange
-        val storage = FakeSdkStorage()
-        storage.put("asl_hash_index_key", "hash123")
-        storage.put("asl_session_by_fqdnhash123", "")
-
-        val (sut, _) = buildSut(storage)
-        val fqdn = "https://api.example.com/resource"
-
-        // Act
-        val result = sut.getCurrentSession(fqdn)
+        val result = sut.getCurrentSession()
 
         // Assert
         assertNull(result)
@@ -124,95 +106,46 @@ class AslStorageImplTest {
     fun getCurrentSession_throwsException_invalidJson() = runTest {
         // Arrange
         val storage = FakeSdkStorage()
-        val fqdn = "https://api.example.com/resource"
-
-        val (sut1, _) = buildSut(storage)
-        sut1.saveSession(fqdn, buildSession())
-
-        val storedKeys = storage.getAll().keys.first { it.startsWith("asl_session_by_fqdn") }
-        storage.put(storedKeys, "{invalid json}")
-        val (sut2, _) = buildSut(storage)
+        val (sut, _) = buildSut(storage)
+        sut.saveSession(buildSession())
+        val sessionKey = storage.getAll().keys.first { it.startsWith(AslStorageImpl.PREFIX) }
+        storage.put(sessionKey, "{invalid json}")
 
         // Act & Assert
         assertFailsWith<Exception> {
-            sut2.getCurrentSession(fqdn)
+            sut.getCurrentSession()
         }
     }
 
     @Test
-    fun clear_removesSession_validFqdn() = runTest {
+    fun clear_removesSession() = runTest {
         // Arrange
         val (sut, _) = buildSut()
-        val fqdn = "https://api.example.com/resource"
-        val session = buildSession()
-        sut.saveSession(fqdn, session)
-
-        // Act
-        sut.clear(fqdn)
-
-        // Assert
-        val result = sut.getCurrentSession(fqdn)
-        assertNull(result)
-    }
-
-    @Test
-    fun clear_doesNotRemoveOtherSessions_multipleSessions() = runTest {
-        // Arrange
-        val (sut, _) = buildSut()
-        val fqdn1 = "https://api1.example.com/resource"
-        val fqdn2 = "https://api2.example.com/resource"
-
-        sut.saveSession(fqdn1, buildSession(requestCounter = 1L))
-        sut.saveSession(fqdn2, buildSession(requestCounter = 2L))
-
-        // Act
-        sut.clear(fqdn1)
-
-        // Assert
-        val result1 = sut.getCurrentSession(fqdn1)
-        val result2 = sut.getCurrentSession(fqdn2)
-        assertNull(result1)
-        assertEquals(2L, result2!!.requestCounter)
-    }
-
-    @Test
-    fun clear_removesAllSessions_multipleSessions() = runTest {
-        // Arrange
-        val (sut, storage) = buildSut()
-        val fqdn1 = "https://api1.example.com/resource"
-        val fqdn2 = "https://api2.example.com/resource"
-        val fqdn3 = "https://api3.example.com/resource"
-        sut.saveSession(fqdn1, buildSession(requestCounter = 1L))
-        sut.saveSession(fqdn2, buildSession(requestCounter = 2L))
-        sut.saveSession(fqdn3, buildSession(requestCounter = 3L))
+        sut.saveSession(buildSession())
 
         // Act
         sut.clear()
 
         // Assert
-        val stored = storage.getAll()
-        val sessionKeys = stored.keys.filter { it.startsWith("asl_session_by_fqdn") }
+        assertNull(sut.getCurrentSession())
+    }
+
+    @Test
+    fun clear_removesAllSessions() = runTest {
+        // Arrange
+        val (sut, storage) = buildSut()
+        sut.saveSession(buildSession(requestCounter = 1L))
+
+        // Act
+        sut.clear()
+
+        // Assert
+        val sessionKeys = storage.getAll().keys.filter { it.startsWith(AslStorageImpl.PREFIX) }
         assertTrue(sessionKeys.isEmpty())
-        assertFalse(stored.containsKey("asl_hash_index_key"))
     }
 
     @Test
-    fun clear_removesHashIndexKey_afterClearingAll() = runTest {
-        // Arrange
-        val (sut, storage) = buildSut()
-        val fqdn = "https://api.example.com/resource"
-        sut.saveSession(fqdn, buildSession())
-
-        // Act
-        sut.clear()
-
-        // Assert
-        val hashIndex = storage.getAll()["asl_hash_index_key"]
-        assertNull(hashIndex)
-    }
-
-    @Test
-    fun clear_handlesEmptyHashList_noSessions() = runTest {
+    fun clear_handlesEmpty_noSessions() = runTest {
         // Arrange
         val (sut, storage) = buildSut()
 
@@ -220,8 +153,7 @@ class AslStorageImplTest {
         sut.clear()
 
         // Assert
-        val stored = storage.getAll()
-        assertTrue(stored.isEmpty())
+        assertTrue(storage.getAll().isEmpty())
     }
 
     @Test
@@ -230,10 +162,8 @@ class AslStorageImplTest {
         val storage = FakeSdkStorage()
         storage.put("other_key_1", "value1")
         storage.put("other_key_2", "value2")
-
         val (sut, _) = buildSut(storage)
-        val fqdn = "https://api.example.com/resource"
-        sut.saveSession(fqdn, buildSession())
+        sut.saveSession(buildSession())
 
         // Act
         sut.clear()
@@ -247,27 +177,11 @@ class AslStorageImplTest {
 
     private class FakeSdkStorage : SdkStorage {
         private val store = mutableMapOf<String, String>()
-
         override suspend fun get(key: String): String? = store[key]
-
-        override suspend fun put(key: String, value: String) {
-            store[key] = value
-        }
-
-        override suspend fun remove(key: String) {
-            store.remove(key)
-        }
-
-        override suspend fun clear() {
-            TODO()
-        }
-
+        override suspend fun put(key: String, value: String) { store[key] = value }
+        override suspend fun remove(key: String) { store.remove(key) }
+        override suspend fun clear() { store.clear() }
         fun getAll(): Map<String, String> = store.toMap()
-    }
-
-    private fun buildSut(storage: SdkStorage = FakeSdkStorage()): Pair<AslStorageImpl, FakeSdkStorage> {
-        val fakeStorage = storage as FakeSdkStorage
-        return AslStorageImpl(fakeStorage, json) to fakeStorage
     }
 }
 

@@ -29,6 +29,7 @@ import de.gematik.zeta.sdk.attestation.model.PlatformProductId
 import de.gematik.zeta.sdk.authentication.AuthConfig
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClientBuilder
+import de.gematik.zeta.sdk.storage.ExtendedStorage
 import de.gematik.zeta.sdk.storage.StorageConfig
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 
@@ -63,6 +64,15 @@ data class BuildConfig(
     val authenticationCallback: AuthenticationCallback? = null,
     val logger: ZetaLogger? = null,
 )
+
+fun BuildConfig.withNamespace(namespace: String): BuildConfig {
+    return copy(
+        storageConfig = when (val sc = storageConfig) {
+            is StorageConfig.Default -> sc.copy(namespace = ExtendedStorage.hash(namespace))
+            is StorageConfig.Custom -> sc
+        },
+    )
+}
 
 data class RegInfo(val clientName: String)
 data class AuthInfo(val otp: String? = null)

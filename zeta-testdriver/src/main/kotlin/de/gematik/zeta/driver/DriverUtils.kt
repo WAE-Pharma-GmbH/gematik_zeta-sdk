@@ -25,6 +25,7 @@
 package de.gematik.zeta.driver
 
 import de.gematik.zeta.driver.model.SdkInstanceConfig
+import de.gematik.zeta.driver.model.toKtorLogLevel
 import de.gematik.zeta.logging.Log
 import de.gematik.zeta.platform.Platform
 import de.gematik.zeta.platform.platform
@@ -36,13 +37,11 @@ import de.gematik.zeta.sdk.ZetaSdkClient
 import de.gematik.zeta.sdk.attestation.model.PlatformProductId
 import de.gematik.zeta.sdk.authentication.AuthConfig
 import de.gematik.zeta.sdk.authentication.smb.SmbTokenProvider
-import de.gematik.zeta.sdk.authentication.smcb.SmcbTokenProvider
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClientBuilder
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpResponse
 import de.gematik.zeta.sdk.storage.SdkStorage
 import de.gematik.zeta.sdk.storage.StorageConfig
-import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.setBody
 import io.ktor.content.ByteArrayContent
@@ -261,7 +260,7 @@ public fun buildWsTargetUrl(
 }
 
 private fun wsClientConfig(instanceConfig: SdkInstanceConfig): ZetaHttpClientBuilder.() -> Unit = {
-    logging(LogLevel.ALL)
+    logging(Log.logLevel.toKtorLogLevel())
     disableServerValidation(instanceConfig.disableTlsVerification)
 }
 
@@ -318,19 +317,6 @@ public fun newSdk(storage: SdkStorage, config: SdkInstanceConfig): ZetaSdkClient
                                 config.smbKeystorePassword,
                             ),
                         )
-
-                    config.smcbBaseUrl.isNotEmpty() ->
-                        SmcbTokenProvider(
-                            SmcbTokenProvider.ConnectorConfig(
-                                config.smcbBaseUrl,
-                                config.smcbMandantId,
-                                config.smcbClientSystemId,
-                                config.smcbWorkspaceId,
-                                config.smcbUserId,
-                                config.smcbCardHandle,
-                            ),
-                        )
-
                     else ->
                         error("No SM-B or SMC-B configuration was provided")
                 },
@@ -340,7 +326,7 @@ public fun newSdk(storage: SdkStorage, config: SdkInstanceConfig): ZetaSdkClient
             ZetaHttpClientBuilder()
                 .timeouts(20000, 20000)
                 .disableServerValidation(config.disableTlsVerification)
-                .logging(LogLevel.ALL)
+                .logging(Log.logLevel.toKtorLogLevel())
                 .contentNegotiation(true)
                 .apply {
                     customCaPems.forEach { pem ->
@@ -378,6 +364,7 @@ public suspend fun authenticate(
     sdk: ZetaSdkClient,
 ) {
     try {
+        Log.i { "[SDK-DRIVER] Authenticate called" }
         val result = sdk.authenticate()
         if (result.isSuccess) {
             call.respond(HttpStatusCode.OK, HttpStatusCode.OK.description)
@@ -385,6 +372,7 @@ public suspend fun authenticate(
             call.respond(HttpStatusCode.Forbidden, HttpStatusCode.Forbidden.description)
         }
     } catch (ex: Throwable) {
+        Log.e { "[SDK-DRIVER] Authenticate failed:" + ex.message }
         call.respond(HttpStatusCode.InternalServerError, ex.message.toString())
     }
 }

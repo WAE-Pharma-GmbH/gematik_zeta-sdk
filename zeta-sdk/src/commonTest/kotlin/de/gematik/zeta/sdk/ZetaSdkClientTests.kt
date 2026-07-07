@@ -35,6 +35,7 @@ import de.gematik.zeta.sdk.configuration.models.AuthorizationServerMetadata
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClientBuilder
 import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import de.gematik.zeta.sdk.storage.SdkStorage
 import de.gematik.zeta.sdk.storage.StorageConfig
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
@@ -49,9 +50,9 @@ import kotlin.time.Clock
 private const val requiredRoleOid = "1.2.276.0.76.4.261"
 
 class ZetaSdkClientTests {
-
     private val aesTestKey: String = "7aae7xXr8rnzVqjpYbosS0CFMrlprkD7jbVotm0fd"
     private val resource = "https://fachdienst.example.com"
+    private val scope = "scope"
     private val authServerIssuer = "https://auth.example.com"
 
     @Test
@@ -1090,16 +1091,17 @@ class ZetaSdkClientTests {
 
     @Test
     fun `status returns NOT_REGISTERED when auth server linked but registration missing`() = runTest {
+        // Arrange
         val storage = InMemoryStorage()
         val client = buildClientWithStorage(storage)
-
-        ConfigurationStorageImpl(storage).linkResourceToAuthorizationServer(
-            resource,
+        ConfigurationStorageImpl(storage, resourceScope).linkResourceToAuthorizationServer(
             getAuthServer(authServerIssuer),
         )
 
+        // Act
         val result = client.status()
 
+        // Assert
         assertTrue(result.isSuccess)
         assertEquals(SdkStatus.NOT_REGISTERED, result.getOrThrow())
     }
@@ -1229,12 +1231,10 @@ class ZetaSdkClientTests {
         assertEquals(SdkStatus.HAS_ACCESS_AND_REFRESH_TOKEN, result.getOrThrow())
     }
 
+    private val resourceScope = ResourceScope(resource, listOf(scope))
     private suspend fun setupRegistration(storage: SdkStorage) {
-        ConfigurationStorageImpl(storage).linkResourceToAuthorizationServer(
-            resource,
-            getAuthServer(authServerIssuer),
-        )
-        ClientRegistrationStorageImpl(storage).saveRegistration(
+        ConfigurationStorageImpl(storage, resourceScope).linkResourceToAuthorizationServer(getAuthServer(authServerIssuer))
+        ClientRegistrationStorageImpl(storage, resourceScope).saveRegistration(
             authServer = authServerIssuer,
             registrationResponse = ClientRegistrationResponse(clientId = "client-123"),
         )
@@ -1246,65 +1246,64 @@ class ZetaSdkClientTests {
         refreshToken: String = "refresh-token",
         expiresAt: Long = Clock.System.now().epochSeconds + 3600,
     ) {
-        AuthenticationStorageImpl(storage).saveAccessTokens(
-            fqdn = resource,
+        AuthenticationStorageImpl(storage, resourceScope).saveAccessTokens(
             accessToken = accessToken,
             refreshToken = refreshToken,
             expiresAt = expiresAt,
         )
     }
-}
 
-private fun createTestBuildConfig(storage: SdkStorage? = InMemoryStorage()): BuildConfig {
-    return BuildConfig(
-        productId = "product-123",
-        productVersion = "1.0.0",
-        clientName = "TestClient",
-        storageConfig = StorageConfig.Custom(storage!!),
-        tpmConfig = object : TpmConfig {},
-        authConfig = createTestAuthConfig(),
-        platformProductId = createTestPlatformProductId(),
-    )
-}
+    private fun createTestAuthConfig(): AuthConfig {
+        return AuthConfig(
+            listOf(scope),
+            300,
+            false,
+            SmbTokenProvider(
+                SmbTokenProvider.Credentials("", "", ""),
+            ),
+            requiredRoleOid = requiredRoleOid,
+        )
+    }
 
-private fun createTestAuthConfig(): AuthConfig {
-    return AuthConfig(
-        listOf("test:audience"),
-        300,
-        false,
-        SmbTokenProvider(
-            SmbTokenProvider.Credentials("", "", ""),
-        ),
-        requiredRoleOid = requiredRoleOid,
-    )
-}
+    private fun createTestPlatformProductId(): PlatformProductId {
+        return PlatformProductId.LinuxProductId(
+            platform = "linux",
+            "",
+            "test",
+            "1.0",
+        )
+    }
 
-private fun createTestPlatformProductId(): PlatformProductId {
-    return PlatformProductId.LinuxProductId(
-        platform = "linux",
-        "",
-        "test",
-        "1.0",
-    )
-}
+    private fun getAuthServer(resource: String): AuthorizationServerMetadata {
+        return AuthorizationServerMetadata(
+            issuer = resource,
+            authorizationEndpoint = "",
+            tokenEndpoint = "token_endpoint",
+            nonceEndpoint = "",
+            openidProvidersEndpoint = "test open id",
+            jwksUri = "",
+            scopesSupported = listOf(""),
+            responseTypesSupported = listOf("TOKEN"),
+            responseModesSupported = listOf(""),
+            grantTypesSupported = listOf(""),
+            tokenEndpointAuthMethodsSupported = listOf(""),
+            tokenEndpointAuthSigningAlgValuesSupported = listOf(""),
+            serviceDocumentation = "",
+            uiLocalesSupported = listOf(""),
+            codeChallengeMethodsSupported = listOf(""),
+            registrationEndpoint = "",
+        )
+    }
 
-private fun getAuthServer(resource: String): AuthorizationServerMetadata {
-    return AuthorizationServerMetadata(
-        issuer = resource,
-        authorizationEndpoint = "",
-        tokenEndpoint = "token_endpoint",
-        nonceEndpoint = "",
-        openidProvidersEndpoint = "test open id",
-        jwksUri = "",
-        scopesSupported = listOf(""),
-        responseTypesSupported = listOf("TOKEN"),
-        responseModesSupported = listOf(""),
-        grantTypesSupported = listOf(""),
-        tokenEndpointAuthMethodsSupported = listOf(""),
-        tokenEndpointAuthSigningAlgValuesSupported = listOf(""),
-        serviceDocumentation = "",
-        uiLocalesSupported = listOf(""),
-        codeChallengeMethodsSupported = listOf(""),
-        registrationEndpoint = "",
-    )
+    private fun createTestBuildConfig(storage: SdkStorage? = InMemoryStorage()): BuildConfig {
+        return BuildConfig(
+            productId = "product-123",
+            productVersion = "1.0.0",
+            clientName = "TestClient",
+            storageConfig = StorageConfig.Custom(storage!!),
+            tpmConfig = object : TpmConfig {},
+            authConfig = createTestAuthConfig(),
+            platformProductId = createTestPlatformProductId(),
+        )
+    }
 }

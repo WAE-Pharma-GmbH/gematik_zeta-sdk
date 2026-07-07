@@ -53,10 +53,10 @@ open class ClientRegistrationHandler(
         need: FlowNeed,
         ctx: FlowContext,
     ): CapabilityResult {
-        val authServer = ctx.configurationStorage.getAuthServer(ctx.resource)
+        val authServer = ctx.configurationStorage.getAuthServer()
         checkNotNull(authServer) { "Failed to load authorization server metadata from storage" }
 
-        val clientId = ctx.clientRegistrationStorage.getClientId(authServer.issuer)
+        val clientId = ctx.clientRegistrationStorage.getClientId(authServer.registrationEndpoint ?: authServer.issuer)
         if (!clientId.isNullOrBlank()) {
             return CapabilityResult.Done
         }

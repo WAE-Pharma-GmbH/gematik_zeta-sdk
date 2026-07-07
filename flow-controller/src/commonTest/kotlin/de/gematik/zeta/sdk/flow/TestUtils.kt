@@ -34,6 +34,7 @@ import de.gematik.zeta.sdk.configuration.models.ProtectedResourceMetadata
 import de.gematik.zeta.sdk.configuration.models.ZetaAslUse
 import de.gematik.zeta.sdk.flow.RequestEvaluatorImplTest.FakeForwardingClient
 import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import de.gematik.zeta.sdk.storage.SdkStorage
 import kotlinx.serialization.json.Json
 import kotlin.collections.Map
@@ -72,9 +73,9 @@ class FakeApi(
 /**
  * Test util.
  */
-fun getDummyFlowContext(): FlowContext =
+fun getDummyFlowContext(scope: String = "https://auth.example.com"): FlowContext =
     FlowContextImpl(
-        "https://api.example.com",
+        ResourceScope("https://api.example.com", listOf(scope)),
         { TODO("Not need for test") },
         InMemoryStorage(),
     )
@@ -119,7 +120,7 @@ fun getDummyAuthServerObject(
         nonceEndpoint = "",
         openidProvidersEndpoint = "",
         jwksUri = "",
-        scopesSupported = listOf(""),
+        scopesSupported = listOf("https://auth.example.com"),
         responseTypesSupported = listOf("TOKEN"),
         responseModesSupported = listOf(""),
         grantTypesSupported = listOf(""),
@@ -135,7 +136,7 @@ fun getDummyAuthServerObject(
  * Test util.
  */
 fun getDummyProtectedResourceObject(
-    resource: String = "",
+    resource: String = "resource",
     authorizationServers: List<String> = emptyList(),
 ): ProtectedResourceMetadata =
     ProtectedResourceMetadata(
@@ -143,7 +144,7 @@ fun getDummyProtectedResourceObject(
         authorizationServers = authorizationServers,
         zetaAslUse = ZetaAslUse.NOT_SUPPORTED,
         jwksUri = "",
-        scopesSupported = listOf(""),
+        scopesSupported = listOf("https://auth.example.com"),
         bearerMethodsSupported = listOf(BearerMethod.HEADER, BearerMethod.BODY),
         resourceSigningAlgValuesSupported = listOf(""),
         resourceName = "",
@@ -172,12 +173,14 @@ fun getDummyProtectedResourceObject(
     )
 
 suspend fun getDummyContextWithResource(fwdClient: ForwardingClient = FakeForwardingClient(), storage: SdkStorage = InMemoryStorage()): FlowContext {
-    val ctx = FlowContextImpl("test", fwdClient, storage)
+    val resourceScope = ResourceScope("test", emptyList())
+    val ctx = FlowContextImpl(resourceScope, fwdClient, storage)
+
     val good = getDummyProtectedResourceObject("test", listOf("https://auth.example.com"))
     ctx.configurationStorage.saveProtectedResource(Json.encodeToString(good))
 
     val authServer = getDummyAuthServerObject(registrationEndpoint = "test", issuer = "issuer")
-    ctx.configurationStorage.linkResourceToAuthorizationServer("test", authServer)
+    ctx.configurationStorage.linkResourceToAuthorizationServer(authServer)
 
     return ctx
 }

@@ -26,7 +26,6 @@ package de.gematik.zeta.sdk
 
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.websocket.Frame
-import io.ktor.websocket.close
 import io.ktor.websocket.readBytes
 import io.ktor.websocket.readText
 import io.mockk.Runs
@@ -256,5 +255,68 @@ class WsClientExtensionTest {
         session.close()
 
         coVerify { mockSession.send(any<Frame.Close>()) }
+    }
+
+    @Test
+    fun wsSession_receiveNext_fragmentedTextFrames_reassembledIntoSingleMessage() {
+        val mockSession = mockk<DefaultClientWebSocketSession>()
+        val channel = Channel<Frame>(Channel.UNLIMITED)
+
+        channel.trySend(Frame.Text(fin = false, data = "Hel".encodeToByteArray()))
+        channel.trySend(Frame.Text(fin = false, data = "lo ".encodeToByteArray()))
+        channel.trySend(Frame.Text(fin = false, data = "Ze".encodeToByteArray()))
+        channel.trySend(Frame.Text(fin = true, data = "ta".encodeToByteArray()))
+        every { mockSession.incoming } returns channel
+
+        val session = WsClientExtension.WsSession(mockSession)
+        val result = session.receiveNext()
+
+        assertEquals(WsClientExtension.WsMessage.Text("Hello Zeta"), result)
+    }
+
+    @Test
+    fun wsSession_receiveNext_multipleFragmentedMessages_eachReassembledIndependently() {
+        val mockSession = mockk<DefaultClientWebSocketSession>()
+        val channel = Channel<Frame>(Channel.UNLIMITED)
+        channel.trySend(Frame.Text(fin = false, data = "foo".encodeToByteArray()))
+        channel.trySend(Frame.Text(fin = true, data = "bar".encodeToByteArray()))
+        channel.trySend(Frame.Text(fin = false, data = "baz".encodeToByteArray()))
+        channel.trySend(Frame.Text(fin = true, data = "qux".encodeToByteArray()))
+        every { mockSession.incoming } returns channel
+
+        val session = WsClientExtension.WsSession(mockSession)
+
+        assertEquals(WsClientExtension.WsMessage.Text("foobar"), session.receiveNext())
+        assertEquals(WsClientExtension.WsMessage.Text("bazqux"), session.receiveNext())
+    }
+
+    @Test
+    fun wsSession_receiveNext_fragmentedBinaryFrames_reassembledIntoSingleMessage() {
+        val mockSession = mockk<DefaultClientWebSocketSession>()
+        val channel = Channel<Frame>(Channel.UNLIMITED)
+        channel.trySend(Frame.Binary(fin = false, data = byteArrayOf(1, 2, 3)))
+        channel.trySend(Frame.Binary(fin = false, data = byteArrayOf(4, 5)))
+        channel.trySend(Frame.Binary(fin = true, data = byteArrayOf(6)))
+        every { mockSession.incoming } returns channel
+
+        val session = WsClientExtension.WsSession(mockSession)
+        val result = session.receiveNext()
+
+        assertTrue(result is WsClientExtension.WsMessage.Binary)
+        assertContentEquals(byteArrayOf(1, 2, 3, 4, 5, 6), result.bytes)
+    }
+
+    @Test
+    fun wsSession_receiveNext_singleFrameWithFinTrue_worksAsBeforeWithNoBehaviorChange() {
+        val mockSession = mockk<DefaultClientWebSocketSession>()
+        val channel = Channel<Frame>(Channel.UNLIMITED)
+
+        channel.trySend(Frame.Text(fin = true, data = "normal".encodeToByteArray()))
+        every { mockSession.incoming } returns channel
+
+        val session = WsClientExtension.WsSession(mockSession)
+        val result = session.receiveNext()
+
+        assertEquals(WsClientExtension.WsMessage.Text("normal"), result)
     }
 }

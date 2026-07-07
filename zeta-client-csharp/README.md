@@ -40,7 +40,7 @@ After building the SDK, copy the native library for your target platform into th
 Example for macOS ARM64:
 
 ```bash
-cp build/bin/macosArm64/debugShared/libzeta_sdk.dylib \
+cp zeta-sdk/build/bin/macosArm64/debugShared/libzeta_sdk.dylib \
    zeta-client-csharp/runtimes/osx-arm64/native/libzeta_sdk.dylib
 ```
 

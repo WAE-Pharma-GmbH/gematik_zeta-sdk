@@ -24,18 +24,25 @@
 
 package de.gematik.zeta.sdk.authentication
 
+import de.gematik.zeta.sdk.storage.ExtendedStorage.Companion.hash
 import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AuthenticationStorageImplTest {
+    private val resourceScope = ResourceScope("https://example.com", listOf("scope-a"))
 
-    private fun buildSut(): Pair<AuthenticationStorageImpl, InMemoryStorage> {
+    private fun buildSut(
+        scope: ResourceScope = resourceScope,
+    ): Pair<AuthenticationStorageImpl, InMemoryStorage> {
         val storage = InMemoryStorage()
-        return AuthenticationStorageImpl(storage) to storage
+        return AuthenticationStorageImpl(storage, scope) to storage
     }
 
     @Test
@@ -44,11 +51,10 @@ class AuthenticationStorageImplTest {
         val (sut, _) = buildSut()
 
         // Act
-        sut.saveAccessTokens("https://example.com", "access_token", "refresh_token", 9999L)
+        sut.saveAccessTokens("access_token", "refresh_token", 9999L)
 
         // Assert
-        val result = sut.getAccessToken("https://example.com")
-        assertEquals("access_token", result)
+        assertEquals("access_token", sut.getAccessToken())
     }
 
     @Test
@@ -57,11 +63,10 @@ class AuthenticationStorageImplTest {
         val (sut, _) = buildSut()
 
         // Act
-        sut.saveAccessTokens("https://example.com", "access_token", "refresh_token", 9999L)
+        sut.saveAccessTokens("access_token", "refresh_token", 9999L)
 
         // Assert
-        val result = sut.getRefreshToken("https://example.com")
-        assertEquals("refresh_token", result)
+        assertEquals("refresh_token", sut.getRefreshToken())
     }
 
     @Test
@@ -70,40 +75,25 @@ class AuthenticationStorageImplTest {
         val (sut, _) = buildSut()
 
         // Act
-        sut.saveAccessTokens("https://example.com", "access_token", "refresh_token", 9999L)
+        sut.saveAccessTokens("access_token", "refresh_token", 9999L)
 
         // Assert
-        val result = sut.getTokenExpiration("https://example.com")
-        assertEquals("9999", result)
+        assertEquals("9999", sut.getTokenExpiration())
     }
 
     @Test
     fun saveAccessTokens_overwritesTokens_onSecondCall() = runTest {
         // Arrange
         val (sut, _) = buildSut()
-        sut.saveAccessTokens("https://example.com", "old_access", "old_refresh", 1000L)
+        sut.saveAccessTokens("old_access", "old_refresh", 1000L)
 
         // Act
-        sut.saveAccessTokens("https://example.com", "new_access", "new_refresh", 2000L)
+        sut.saveAccessTokens("new_access", "new_refresh", 2000L)
 
         // Assert
-        assertEquals("new_access", sut.getAccessToken("https://example.com"))
-        assertEquals("new_refresh", sut.getRefreshToken("https://example.com"))
-        assertEquals("2000", sut.getTokenExpiration("https://example.com"))
-    }
-
-    @Test
-    fun saveAccessTokens_storesTokensForMultipleFqdns() = runTest {
-        // Arrange
-        val (sut, _) = buildSut()
-
-        // Act
-        sut.saveAccessTokens("https://first.com", "access_1", "refresh_1", 1000L)
-        sut.saveAccessTokens("https://second.com", "access_2", "refresh_2", 2000L)
-
-        // Assert
-        assertEquals("access_1", sut.getAccessToken("https://first.com"))
-        assertEquals("access_2", sut.getAccessToken("https://second.com"))
+        assertEquals("new_access", sut.getAccessToken())
+        assertEquals("new_refresh", sut.getRefreshToken())
+        assertEquals("2000", sut.getTokenExpiration())
     }
 
     @Test
@@ -112,7 +102,7 @@ class AuthenticationStorageImplTest {
         val (sut, _) = buildSut()
 
         // Act
-        val result = sut.getAccessToken("https://unknown.com")
+        val result = sut.getAccessToken()
 
         // Assert
         assertNull(result)
@@ -124,7 +114,7 @@ class AuthenticationStorageImplTest {
         val (sut, _) = buildSut()
 
         // Act
-        val result = sut.getRefreshToken("https://unknown.com")
+        val result = sut.getRefreshToken()
 
         // Assert
         assertNull(result)
@@ -136,20 +126,7 @@ class AuthenticationStorageImplTest {
         val (sut, _) = buildSut()
 
         // Act
-        val result = sut.getTokenExpiration("https://unknown.com")
-
-        // Assert
-        assertNull(result)
-    }
-
-    @Test
-    fun getAccessToken_returnsNull_forDifferentFqdn() = runTest {
-        // Arrange
-        val (sut, _) = buildSut()
-        sut.saveAccessTokens("https://example.com", "access_token", "refresh_token", 9999L)
-
-        // Act
-        val result = sut.getAccessToken("https://other.com")
+        val result = sut.getTokenExpiration()
 
         // Assert
         assertNull(result)
@@ -159,30 +136,15 @@ class AuthenticationStorageImplTest {
     fun clear_removesAllTokens() = runTest {
         // Arrange
         val (sut, _) = buildSut()
-        sut.saveAccessTokens("https://first.com", "access_1", "refresh_1", 1000L)
-        sut.saveAccessTokens("https://second.com", "access_2", "refresh_2", 2000L)
+        sut.saveAccessTokens("access_1", "refresh_1", 1000L)
 
         // Act
         sut.clear()
 
         // Assert
-        assertNull(sut.getAccessToken("https://first.com"))
-        assertNull(sut.getAccessToken("https://second.com"))
-        assertNull(sut.getRefreshToken("https://first.com"))
-        assertNull(sut.getRefreshToken("https://second.com"))
-    }
-
-    @Test
-    fun clear_removesHashIndex() = runTest {
-        // Arrange
-        val (sut, storage) = buildSut()
-        sut.saveAccessTokens("https://example.com", "access_token", "refresh_token", 9999L)
-
-        // Act
-        sut.clear()
-
-        // Assert
-        assertNull(storage.map["hash_index"])
+        assertNull(sut.getAccessToken())
+        assertNull(sut.getRefreshToken())
+        assertNull(sut.getTokenExpiration())
     }
 
     @Test
@@ -198,30 +160,31 @@ class AuthenticationStorageImplTest {
     }
 
     @Test
-    fun saveAccessTokens_usesHashedKeys_notRawFqdn() = runTest {
+    fun saveAccessTokens_doesNotExposeRawFqdn_inStorageKeys() = runTest {
         // Arrange
         val (sut, storage) = buildSut()
-        val fqdn = "https://example.com"
 
         // Act
-        sut.saveAccessTokens(fqdn, "access_token", "refresh_token", 9999L)
+        sut.saveAccessTokens("access_token", "refresh_token", 9999L)
 
         // Assert
-        assertTrue(storage.map.none { it.key.contains(fqdn) })
+        assertTrue(storage.map.none { it.key.contains("example.com") })
     }
 
     @Test
-    fun saveAccessTokens_sameFqdn_doesNotDuplicateHashIndex() = runTest {
+    fun saveAccessTokens_sameScope_doesNotDuplicateIndex() = runTest {
         // Arrange
         val (sut, storage) = buildSut()
 
         // Act
-        sut.saveAccessTokens("https://example.com", "access_1", "refresh_1", 1000L)
-        sut.saveAccessTokens("https://example.com", "access_2", "refresh_2", 2000L)
+        sut.saveAccessTokens("access_1", "refresh_1", 1000L)
+        sut.saveAccessTokens("access_2", "refresh_2", 2000L)
 
         // Assert
-        val hashIndex = storage.map["hash_index"] ?: ""
-        val hashes = hashIndex.split(";").filter { it.isNotBlank() }
-        assertEquals(1, hashes.size)
+        val namespacedKey = hash("${resourceScope.storageKey}:${AuthenticationStorageImpl.INDEX_KEY}")
+        val indexMap = storage.map[namespacedKey]
+        assertNotNull(indexMap)
+        val entries = Json.decodeFromString<Map<String, String>>(indexMap)
+        assertEquals(1, entries.size)
     }
 }

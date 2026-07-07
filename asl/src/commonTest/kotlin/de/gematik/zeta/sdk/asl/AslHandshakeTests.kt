@@ -520,7 +520,7 @@ class AslHandshakeStateTest {
             error("not in scope of the test")
         }
 
-        override suspend fun generateDpopKey(resource: String): PublicKeyOut {
+        override suspend fun generateDpopKey(): PublicKeyOut {
             return PublicKeyOut(byteArrayOf(), Jwk("", "", "", "", "", "", ""))
         }
 

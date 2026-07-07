@@ -79,8 +79,8 @@ private class SoftwareCryptoProvider(
         return PublicKeyOut(clientKey!!.skpi, jwk)
     }
 
-    override suspend fun generateDpopKey(resource: String): PublicKeyOut {
-        val existing = loadDpopKeysFromStorage(resource)
+    override suspend fun generateDpopKey(): PublicKeyOut {
+        val existing = loadDpopKeysFromStorage()
         val key = if (existing != null) {
             existing
         } else {
@@ -95,7 +95,6 @@ private class SoftwareCryptoProvider(
             )
 
             storage.saveDpopKeys(
-                resource,
                 toPem("PUBLIC KEY", generated.skpi),
                 toPem("PRIVATE KEY", generated.privateKey),
             )
@@ -113,7 +112,7 @@ private class SoftwareCryptoProvider(
     }
 
     override suspend fun signWithDpopKey(input: ByteArray, resource: String): ByteArray {
-        val key = checkNotNull(loadDpopKeysFromStorage(resource)) {
+        val key = checkNotNull(loadDpopKeysFromStorage()) {
             "DPoP key not found for resource: $resource"
         }
         return signForJws(key.privateKey, input)
@@ -147,16 +146,16 @@ private class SoftwareCryptoProvider(
 
     override suspend fun forget(resource: String?) {
         if (resource != null) {
-            storage.deleteDpopKeys(resource)
+            storage.deleteDpopKeys()
         } else {
             clientKey = null
             storage.deleteAllDpopKeys()
         }
     }
 
-    private suspend fun loadDpopKeysFromStorage(resource: String): KeyPair? {
-        val privRaw = storage.getDpopPrivateKey(resource) ?: return null
-        val pubRaw = storage.getDpopPublicKey(resource) ?: return null
+    private suspend fun loadDpopKeysFromStorage(): KeyPair? {
+        val privRaw = storage.getDpopPrivateKey() ?: return null
+        val pubRaw = storage.getDpopPublicKey() ?: return null
 
         return try {
             KeyPair(
@@ -165,7 +164,7 @@ private class SoftwareCryptoProvider(
                 privateKey = decodePem(decodeHexPem(privRaw)),
             )
         } catch (ex: Exception) {
-            Log.d { "Failed to load DPoP keys for $resource: ${ex.message}" }
+            Log.d { "Failed to load DPoP keys: ${ex.message}" }
             null
         }
     }
