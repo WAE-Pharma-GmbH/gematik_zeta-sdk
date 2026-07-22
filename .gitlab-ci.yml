@@ -16,6 +16,14 @@ spec:
       description: 'Run Ben Manes dependency update report'
       type: boolean
       default: true
+    do_pre_release_checks:
+      description: "Run pre-release checks: client build + tests (C#, Java) and dependency scan. Automatically enabled when merging to or pushing on staging/release."
+      type: boolean
+      default: false
+    do_client_tests_only:
+      description: "Fast lane: run ONLY the client build+test jobs (C#, Java), skipping all other stages"
+      type: boolean
+      default: false
 
 ---
 
@@ -77,10 +85,17 @@ default:
 stages:
   - testAndAnalysis
   - build
+  - client_tests
   - publish
   - image_build
   - container_scan
   - report
+
+# Fast-lane skip: when do_client_tests_only is set, every non-client-test job is disabled,
+# regardless of any other condition. This must be the FIRST rule wherever it's included.
+.skip-if-client-tests-only: &skip-if-client-tests-only
+  - if: '"$[[ inputs.do_client_tests_only ]]" == "true"'
+    when: never
 
 # define the release version variable, that determines the tag in the repositories
 # this is included (referenced) in the various build stages/jobs
@@ -89,6 +104,7 @@ stages:
     SONAR_QUALITY_GATE_ENABLED: $[[ inputs.sonar-quality-gate-enabled ]]
     RELEASE_VERSION: $RELEASE_VERSION_WEB
   rules:
+    - !reference [ .skip-if-client-tests-only ]
     # if on a tag, set the release version to the tag
     - if: $CI_COMMIT_TAG != null
       variables:
@@ -143,8 +159,15 @@ stages:
     - !reference [ .variables_template, rules ]
     - when: on_success
 
+.pre-release-checks-rules: &pre-release-checks-rules
+  rules:
+    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "staging"'
+    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "release"'
+    - if: '$CI_COMMIT_BRANCH == "staging"'
+    - if: '$CI_COMMIT_BRANCH == "release"'
+    - if: '"$[[ inputs.do_pre_release_checks ]]" == "true"'
+    - if: '"$[[ inputs.do_client_tests_only ]]" == "true"'
 
-########################################################################
 # gradle jobs
 
 test:
@@ -239,6 +262,7 @@ dependency-updates:
   <<: *gradle_template
   stage: testAndAnalysis
   rules:
+    - !reference [ .skip-if-client-tests-only ]
     - if: '"$[[ inputs.do_dependency_updates_check ]]" == "true"'
       when: on_success
     - when: never
@@ -251,11 +275,34 @@ dependency-updates:
       - "**/build/dependencyUpdates/report.txt"
       - "**/build/dependencyUpdates/report.json"
 
+dependency-check-gradle:
+  rules:
+    - !reference [ .skip-if-client-tests-only ]
+    - if: '"$[[ inputs.do_dependency_scan ]]" == "true"'
+      when: on_success
+    - !reference [ .pre-release-checks-rules, rules ]
+    - when: never
+
 build:
   <<: *gradle_template
   stage: build
   script:
     - ./gradlew assemblePullRequest
+
+test-linux-shared-lib:
+  stage: build
+  image: $CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX/eclipse-temurin:21-jdk
+  rules:
+    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "staging"'
+    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "release"'
+  script:
+    - apt-get update && apt-get install -y libunistring-dev
+    - ./gradlew :zeta-sdk:linkReleaseSharedLinuxX64
+  artifacts:
+    expire_in: 1 week
+    when: always
+    paths:
+      - "zeta-sdk/build/bin/linuxX64/releaseShared/*"
 
 build_dokka:
   <<: *gradle_template
@@ -281,6 +328,187 @@ sbom:
       - "**/build/reports/cyclonedx/bom.json"
       - "**/build/reports/cyclonedx/bom.xml"
 
+build-sdk-linux:
+  stage: client_tests
+  image: $CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX/eclipse-temurin:21-jdk
+  tags:
+    - attestation-vm-linux
+  <<: *pre-release-checks-rules
+  before_script:
+    - java -version
+    - echo "$SMB_KEYSTORE_FILE_B64" | base64 -d > /tmp/smcb.p12
+  script:
+    - export SMB_KEYSTORE_FILE=/tmp/smcb.p12
+    - apt-get update && apt-get install -y libunistring-dev
+    - ./gradlew :zeta-sdk:linkReleaseSharedLinuxX64
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - "zeta-sdk/build/bin/linuxX64/releaseShared/*"
+
+build-sdk-windows:
+  stage: client_tests
+  tags:
+    - attestation-vm-win
+  <<: *pre-release-checks-rules
+  before_script:
+    - java -version
+    - New-Item -ItemType Directory -Force -Path "C:\tmp"
+    - "[System.Convert]::FromBase64String($env:SMB_KEYSTORE_FILE_B64) | Set-Content -Path 'C:\\tmp\\smcb.p12' -AsByteStream"
+  script:
+    - $env:SMB_KEYSTORE_FILE = "C:\\tmp\\smcb.p12"
+    - .\gradlew.bat :zeta-sdk:linkReleaseSharedMingwX64
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - "zeta-sdk/build/bin/mingwX64/releaseShared/*"
+
+# build-sdk-macos:
+#   stage: client_tests
+#   tags:
+#     - attestation-vm-macos
+#   <<: *pre-release-checks-rules
+#   before_script:
+#     - java -version
+#     - echo "$SMB_KEYSTORE_FILE_B64" | base64 -d > /tmp/smcb.p12
+#   script:
+#     - export SMB_KEYSTORE_FILE=/tmp/smcb.p12
+#     - ./gradlew :zeta-sdk:linkReleaseSharedMacosArm64
+#   artifacts:
+#     expire_in: 1 week
+#     paths:
+#       - "zeta-sdk/build/bin/macosArm64/releaseShared/*"
+
+client-test-csharp-linux:
+  stage: client_tests
+  image: $CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX/eclipse-temurin:21-jdk
+  allow_failure: true
+  tags:
+    - attestation-vm-linux
+  <<: *pre-release-checks-rules
+  needs:
+    - job: build-sdk-linux
+      artifacts: true
+  before_script:
+    - dotnet --info
+    - echo "$SMB_KEYSTORE_FILE_B64" | base64 -d > /tmp/smcb.p12
+  script:
+    - export SMB_KEYSTORE_FILE=/tmp/smcb.p12
+    - mkdir -p zeta-client-csharp/runtimes/linux-x64/native
+    - cp zeta-sdk/build/bin/linuxX64/releaseShared/libzeta_sdk.so zeta-client-csharp/runtimes/linux-x64/native/libzeta_sdk.so
+    - cd zeta-client-csharp/sample
+    - dotnet run
+
+client-test-csharp-windows:
+  stage: client_tests
+  allow_failure: true
+  tags:
+    - attestation-vm-win
+  <<: *pre-release-checks-rules
+  needs:
+    - job: build-sdk-windows
+      artifacts: true
+  before_script:
+    - dotnet --info
+    - New-Item -ItemType Directory -Force -Path "C:\tmp"
+    - "[System.Convert]::FromBase64String($env:SMB_KEYSTORE_FILE_B64) | Set-Content -Path 'C:\\tmp\\smcb.p12' -AsByteStream"
+  script:
+    - $env:SMB_KEYSTORE_FILE = "C:\\tmp\\smcb.p12"
+    - New-Item -ItemType Directory -Force -Path "zeta-client-csharp\runtimes\win-x64\native"
+    - Copy-Item "zeta-sdk\build\bin\mingwX64\releaseShared\zeta_sdk.dll" -Destination "zeta-client-csharp\runtimes\win-x64\native\zeta_sdk.dll"
+    - cd zeta-client-csharp\sample
+    - dotnet run
+
+# client-test-csharp-macos:
+#   stage: client_tests
+#   tags:
+#     - attestation-vm-macos
+#   <<: *pre-release-checks-rules
+#   needs:
+#     - job: build-sdk-macos
+#       artifacts: true
+#   before_script:
+#     - dotnet --info
+#     - echo "$SMB_KEYSTORE_FILE_B64" | base64 -d > /tmp/smcb.p12
+#   script:
+#     - export SMB_KEYSTORE_FILE=/tmp/smcb.p12
+#     - mkdir -p zeta-client-csharp/runtimes/osx-arm64/native
+#     - cp zeta-sdk/build/bin/macosArm64/releaseShared/libzeta_sdk.dylib zeta-client-csharp/runtimes/osx-arm64/native/libzeta_sdk.dylib
+#     - cd zeta-client-csharp/sample
+#     - dotnet run
+
+client-test-java:
+  stage: client_tests
+  image: $CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX/eclipse-temurin:21-jdk
+  allow_failure: true
+  tags:
+    - zeta
+  <<: *pre-release-checks-rules
+  before_script:
+    - java -version
+    - echo "$SMB_KEYSTORE_FILE_B64" | base64 -d > /tmp/smcb.p12
+  script:
+    - export SMB_KEYSTORE_FILE=/tmp/smcb.p12
+    - ./gradlew :zeta-client-java:run
+  artifacts:
+    expire_in: 1 week
+    when: always
+    paths:
+      - "zeta-client-java/build/**/*"
+
+# client-test-cpp-linux:
+#   stage: client_tests
+#   image: $CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX/eclipse-temurin:21-jdk
+#   <<: *pre-release-checks-rules
+#   before_script:
+#     - java -version
+#     - apt-get update
+#     - apt-get install -y libunistring-dev
+#     - echo "$SMB_KEYSTORE_FILE_B64" | base64 -d > /tmp/smcb.p12
+#   script:
+#     - export SMB_KEYSTORE_FILE=/tmp/smcb.p12
+#     - ./gradlew :zeta-client-cpp:runRelease
+#   artifacts:
+#     expire_in: 1 week
+#     when: always
+#     paths:
+#       - "zeta-client-cpp/build/**/*"
+
+# client-test-cpp-windows:
+#   stage: client_tests
+#   tags:
+#     - attestation-vm-win
+#   <<: *pre-release-checks-rules
+#   before_script:
+#     - java -version
+#     - New-Item -ItemType Directory -Force -Path "C:\tmp"
+#     - "[System.Convert]::FromBase64String($env:SMB_KEYSTORE_FILE_B64) | Set-Content -Path 'C:\\tmp\\smcb.p12' -AsByteStream"
+#   script:
+#     - $env:SMB_KEYSTORE_FILE = "C:\\tmp\\smcb.p12"
+#     - .\gradlew.bat :zeta-client-cpp:runRelease
+#   artifacts:
+#     expire_in: 1 week
+#     when: always
+#     paths:
+#       - "zeta-client-cpp/build/**/*"
+
+# client-test-cpp-macos:
+#   stage: client_tests
+#   tags:
+#     - attestation-vm-macos
+#   <<: *pre-release-checks-rules
+#   before_script:
+#     - java -version
+#     - echo "$SMB_KEYSTORE_FILE_B64" | base64 -d > /tmp/smcb.p12
+#   script:
+#     - export SMB_KEYSTORE_FILE=/tmp/smcb.p12
+#     - ./gradlew :zeta-client-cpp:runRelease
+#   artifacts:
+#     expire_in: 1 week
+#     when: always
+#     paths:
+#       - "zeta-client-cpp/build/**/*"
+
 publish:
   <<: *gradle_template
   stage: publish
@@ -292,6 +520,7 @@ publish:
 publish_artifacts:
   stage: report
   rules:
+    - !reference [ .skip-if-client-tests-only ]
     - if: $CI_COMMIT_TAG
       variables:
         COMMIT_MESSAGE: "$CI_COMMIT_TAG"
@@ -436,6 +665,7 @@ trigger_helm:
     - job: build-image-nativetestdriver
       optional: true
   rules:
+    - !reference [ .skip-if-client-tests-only ]
     # deploy to staging
     - if: '$CI_COMMIT_BRANCH == "develop"'
       variables:
@@ -500,6 +730,7 @@ container_scan:
     # May still pass if allow_failure set to true (only when merging to develop)
     SEVERITIES: "UNKNOWN,MEDIUM,HIGH,CRITICAL"
   rules:
+    - !reference [ .skip-if-client-tests-only ]
     # when merging to develop, only warn on trivy failures (for MEDIUM and up)
     - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" && $RELEASE_VERSION_WEB == "latest"
       variables:
@@ -547,14 +778,3 @@ publish_to_dependencytrack:
       -F "projectVersion=${RELEASE_VERSION}"
       -F "autoCreate=true"
       -F "bom=@build/reports/cyclonedx/bom.json"
-#    - >-
-#      for i in asl flow-controller tpm configuration client-registration crypto common storage zeta-sdk network authentication attestation . attestation-service zeta-client zeta-client-cpp zeta-testdriver zeta-client-java ktor-client-curl; do
-#      curl -X POST ${DEPENDENCYTRACK_URL}
-#      -H "Content-Type: multipart/form-data"
-#      -H "X-API-Key: ${DEPENDENCYTRACK_TOKEN}"
-#      -F "projectName=zeta-sdk-$i"
-#      -F "projectVersion=${RELEASE_VERSION}"
-#      -F "autoCreate=true"
-#      -F "bom=@./$i/build/reports/cyclonedx-direct/bom.json";
-#      done
-

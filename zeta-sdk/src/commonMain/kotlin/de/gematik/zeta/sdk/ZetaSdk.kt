@@ -35,6 +35,7 @@ import de.gematik.zeta.sdk.authentication.AuthenticationApiImpl
 import de.gematik.zeta.sdk.authentication.HttpAuthHeaders
 import de.gematik.zeta.sdk.clientregistration.ClientRegistrationApiImpl
 import de.gematik.zeta.sdk.configuration.ConfigurationApiImpl
+import de.gematik.zeta.sdk.flow.CapabilityResult
 import de.gematik.zeta.sdk.flow.FlowContextImpl
 import de.gematik.zeta.sdk.flow.FlowNeed
 import de.gematik.zeta.sdk.flow.FlowOrchestrator
@@ -46,6 +47,7 @@ import de.gematik.zeta.sdk.flow.handler.EnsureAccessTokenHandler
 import de.gematik.zeta.sdk.flow.handler.RetryHandler
 import de.gematik.zeta.sdk.flow.zetaPlugin
 import de.gematik.zeta.sdk.network.http.client.CompositeCookieStorage
+import de.gematik.zeta.sdk.network.http.client.RevocationChecker
 import de.gematik.zeta.sdk.network.http.client.SdkCookieStorage
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClientBuilder
@@ -100,6 +102,7 @@ object ZetaSdk {
                 tpmProvider.forget()
                 flowContext.aslStorage.clear()
                 sdkCookieStorage.clearCookie()
+                flowContext.revocationStorage.clear()
             }
 
             else -> this.logout().getOrThrow()
@@ -138,27 +141,34 @@ class ZetaSdkClientImpl(
     val sdkCookieStorage = SdkCookieStorage(storage, resourceScope)
     private val compositeCookieStorage = CompositeCookieStorage(sdkCookieStorage)
 
-    private val httpClientBuilder: ZetaHttpClientBuilder =
-        (cfg.httpClientBuilder ?: ZetaHttpClientBuilder())
-            .copy(
-                baseUrl = resourceScope.fqdn,
-                cookieStorage = compositeCookieStorage,
-            )
-
-    init {
-        cfg.logger?.let { Log.setLogger(it) }
-    }
     private val forwardingClient = ForwardingClient { builder ->
         mainHttpClient.request {
             takeFrom(builder)
         }
     }
 
+    val flowContext = FlowContextImpl(resourceScope, forwardingClient, storage)
+
+    private val revocationChecker = RevocationChecker(
+        storage = flowContext.revocationStorage,
+    )
+
+    private val httpClientBuilder: ZetaHttpClientBuilder =
+        (cfg.httpClientBuilder ?: ZetaHttpClientBuilder())
+            .copy(
+                baseUrl = resourceScope.fqdn,
+                cookieStorage = compositeCookieStorage,
+            )
+            .revocationChecker(revocationChecker)
+
+    init {
+        cfg.logger?.let { Log.setLogger(it) }
+    }
+
     private var clientRegistrationApiClient: ZetaHttpClient? = null
     private var authApiClient: ZetaHttpClient? = null
     private var aslApiClient: ZetaHttpClient? = null
 
-    val flowContext = FlowContextImpl(resourceScope, forwardingClient, storage)
     private val configHandler: ConfigurationHandler by lazy {
         ConfigurationHandler(ConfigurationApiImpl(httpClientBuilder))
     }
@@ -190,10 +200,10 @@ class ZetaSdkClientImpl(
     private lateinit var aslApi: AslApi
     private val aslHandler: AslHandler by lazy {
         aslApi = AslApiImpl(
-            resourceScope.storageKey,
             cfg.authConfig.aslProdEnvironment,
             cfg.authConfig.requiredRoleOid,
             flowContext.aslStorage,
+            revocationChecker,
             httpClientBuilder.build().also { aslApiClient = it },
             accessTokenProvider,
             tpmProvider,
@@ -218,38 +228,42 @@ class ZetaSdkClientImpl(
         val (result, time) = measureTimedValue {
             Log.i { "[SDK-DISCOVER] start" }
             configHandler.handle(FlowNeed.ConfigurationFiles, flowContext)
-            Log.i { "[SDK-DISCOVER] end" }
+                .also { Log.i { "[SDK-DISCOVER] end" } }
         }
         Log.i { "[SDK-TIMING] discover (configHandler)=$time result=$result" }
-        result
-    }.map { }
+        result.orThrow()
+    }
 
     override suspend fun register(): Result<Unit> = runCatching {
         val (result, time) = measureTimedValue {
             clientRegistrationHandler.handle(FlowNeed.ClientRegistration, flowContext)
         }
         Log.i { "[SDK-TIMING] register (clientRegistrationHandler)=$time result=$result" }
-        result
-    }.map {}
+        result.orThrow()
+    }
 
     override suspend fun authenticate(): Result<Unit> = runCatching {
         val (result, time) = measureTimedValue {
             authHandler.handle(FlowNeed.Authentication, flowContext)
         }
         Log.i { "[SDK-TIMING] authenticate (authHandler)=$time result=$result" }
-        result
-    }.map {}
+        result.orThrow()
+    }
 
     /**
-     * Create and configure an [HttpClient] with the [zetaPlugin] using the [ZetaHttpClientBuilder] DSL.
-     * This variant wires the flow-controller into the client pipeline, enabling request/response orchestration
-     * such as authentication, service discovery, schema validation,device registration and retries.
-     * @param builder configuration lambda executed on a fresh [ZetaHttpClientBuilder].
-     * @return A built and configured [HttpClient].
+     * Fail the surrounding [runCatching] when a handler reports a failure, so the
+     * returned [Result] reflects the outcome instead of silently succeeding.
      */
+    private fun CapabilityResult.orThrow() {
+        if (this is CapabilityResult.Error) {
+            error("[$internalCode] $internalMessage")
+        }
+    }
+
     override fun httpClient(builder: ZetaHttpClientBuilder.() -> Unit): ZetaHttpClient {
         val orchestrator = newOrchestrator()
-        mainHttpClient = ZetaHttpClientBuilder(resourceScope.fqdn, cookieStorage = sdkCookieStorage)
+        mainHttpClient = httpClientBuilder
+            .copy(cookieStorage = sdkCookieStorage)
             .apply(builder)
             .build(addExtras = {
                 install(aslDecryptionPlugin(aslApi, InnerHttpCodecImpl()))
@@ -274,7 +288,8 @@ class ZetaSdkClientImpl(
         val hashedToken = accessTokenProvider.hash(token)
         val dpop = accessTokenProvider.createDpopToken(dpopKey.jwk, "GET", targetUrl, null, hashedToken)
 
-        val wsClient = ZetaHttpClientBuilder(resourceScope.fqdn, cookieStorage = sdkCookieStorage)
+        val wsClient = httpClientBuilder
+            .copy(cookieStorage = sdkCookieStorage)
             .apply(builder)
             .build()
 

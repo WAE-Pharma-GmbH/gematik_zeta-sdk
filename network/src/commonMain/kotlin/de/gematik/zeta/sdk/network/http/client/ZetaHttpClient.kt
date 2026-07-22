@@ -84,6 +84,7 @@ import kotlin.io.encoding.Base64
  */
 internal fun zetaHttpClient(
     configure: ClientConfig.() -> Unit,
+    dependencies: HttpClientDependencies,
     addExtras: (HttpClientConfig<*>.() -> Unit)? = null,
 ): ZetaHttpClient {
     Log.i { "Configuring the HTTP client" }
@@ -149,7 +150,7 @@ internal fun zetaHttpClient(
     val httpClient = if (injected != null) {
         HttpClient(injected()) { commonSetup(this) }
     } else {
-        buildHttpClient(cfg, commonSetup)
+        buildHttpClient(cfg, dependencies, commonSetup)
     }
 
     return ZetaHttpClient(httpClient)
@@ -168,10 +169,11 @@ internal fun zetaHttpClient(
  */
 internal expect fun buildPlatformClient(
     cfg: ClientConfig,
+    dependencies: HttpClientDependencies,
     commonSetup: HttpClientConfig<*>.() -> Unit,
 ): HttpClient
 
-public fun buildHttpClient(cfg: ClientConfig, commonSetup: HttpClientConfig<*>.() -> Unit): HttpClient {
+public fun buildHttpClient(cfg: ClientConfig, dependencies: HttpClientDependencies, commonSetup: HttpClientConfig<*>.() -> Unit): HttpClient {
     val composedSetup: HttpClientConfig<*>.() -> Unit = {
         cfg.network.proxyConfig?.let { proxyConfig ->
             if (proxyConfig.type == ProxyType.HTTP && proxyConfig.username != null && proxyConfig.password != null) {
@@ -185,7 +187,7 @@ public fun buildHttpClient(cfg: ClientConfig, commonSetup: HttpClientConfig<*>.(
         commonSetup()
     }
 
-    return buildPlatformClient(cfg, composedSetup)
+    return buildPlatformClient(cfg, dependencies, composedSetup)
 }
 
 /** Normalizes a URL/host to a lowercase FQDN key. */

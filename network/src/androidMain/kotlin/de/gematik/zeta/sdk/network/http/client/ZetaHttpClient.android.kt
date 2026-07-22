@@ -65,6 +65,7 @@ import java.security.cert.X509Certificate
  */
 internal actual fun buildPlatformClient(
     cfg: ClientConfig,
+    dependencies: HttpClientDependencies,
     commonSetup: HttpClientConfig<*>.() -> Unit,
 ): HttpClient {
     // Parse additional CA PEMs to X.509 certificates.

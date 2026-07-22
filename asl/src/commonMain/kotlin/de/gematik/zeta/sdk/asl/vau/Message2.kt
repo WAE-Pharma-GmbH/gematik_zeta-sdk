@@ -26,10 +26,10 @@ package de.gematik.zeta.sdk.asl.vau
 
 import de.gematik.zeta.logging.Log
 import de.gematik.zeta.sdk.asl.AslCertDataApi
+import de.gematik.zeta.sdk.asl.AslStorage
 import de.gematik.zeta.sdk.asl.AslTiRootStore
 import de.gematik.zeta.sdk.asl.CertData
 import de.gematik.zeta.sdk.asl.EncapsulationResult
-import de.gematik.zeta.sdk.asl.Environment
 import de.gematik.zeta.sdk.asl.HttpCertDataFetcher
 import de.gematik.zeta.sdk.asl.K2Keys
 import de.gematik.zeta.sdk.asl.M3InnerLayer
@@ -46,13 +46,13 @@ import de.gematik.zeta.sdk.crypto.EcPointP256
 import de.gematik.zeta.sdk.crypto.EcdhSigner
 import de.gematik.zeta.sdk.crypto.Hkdf
 import de.gematik.zeta.sdk.crypto.Kem
-import de.gematik.zeta.sdk.crypto.OcspHandlerImpl
+import de.gematik.zeta.sdk.crypto.RevocationHandlerImpl
 import de.gematik.zeta.sdk.crypto.X509CertValidator
 import de.gematik.zeta.sdk.crypto.hashWithSha256
+import de.gematik.zeta.sdk.network.http.client.RevocationChecker
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
 import de.gematik.zeta.sdk.network.http.client.config.tls.sanMatchesHost
 import de.gematik.zeta.sdk.network.http.client.hostOf
-import de.gematik.zeta.sdk.network.http.client.validateRevocation
 import io.ktor.client.request.HttpRequestBuilder
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlin.time.Clock
@@ -79,9 +79,10 @@ internal suspend fun processMessage2AndDeriveMessage3(
             validation = CertValidationBundle(
                 http = http,
                 certDataFetcher = HttpCertDataFetcher(http.client, http.request),
+                certDataCache = asl.storage,
                 tiTrustAnchors = AslTiRootStore(http.client, tiEnvironment).getTrustAnchors(Clock.System),
+                revocationChecker = asl.revocationChecker,
             ),
-            environment = if (asl.prodEnvironment) Environment.Production else Environment.Testing,
             requiredRoleOid = asl.requiredRoleOid,
         )
     } else {
@@ -213,31 +214,29 @@ internal suspend fun validateSignedVauPublicKeys(
     signed: SignedVauPublicKeys,
     validation: CertValidationBundle,
     clock: Clock = Clock.System,
-    environment: Environment = Environment.Production,
     requiredRoleOid: String,
 ) {
     decodeAndValidateVauKeys(signed, clock)
 
-    val certData = validation.certDataFetcher.fetch(
-        signed.certificateHash.toHexString(),
-        signed.certificateDescriptionVersion,
-    )
+    val certHashHex = signed.certificateHash.toHexString()
+    val certVersion = signed.certificateDescriptionVersion
+
+    val certData = validation.certDataCache.getCachedCertData(certHashHex, certVersion)
+        ?: validation.certDataFetcher.fetch(certHashHex, certVersion).also { fetched ->
+            validation.certDataCache.saveCachedCertData(certHashHex, certVersion, fetched)
+        }
 
     val resourceHost = hostOf(validation.http.request.url.toString())
 
     validateCertificate(certData, resourceHost, validation)
     validateChain(certData, validation)
     validateRoleOid(certData.cert, requiredRoleOid, validation.certChainValidator)
-    validateRevocation(
+    validateSignature(signed, certData.cert, validation)
+    validation.revocationChecker.validate(
         stapledOcspResponse = signed.ocspResponse.takeIf { it.isNotEmpty() },
         certDer = certData.cert,
         issuerDer = certData.ca,
-        ocspValidator = validation.ocspValidator,
-        httpClient = validation.http.client.delegate,
-        maxOcspAgeSeconds = 24 * 3600,
-        allowSkipForTestCertificates = environment != Environment.Production,
     )
-    validateSignature(signed, certData.cert, validation)
 }
 
 @OptIn(ExperimentalSerializationApi::class)
@@ -359,13 +358,17 @@ internal data class HttpContext(
 internal data class AslContext(
     val prodEnvironment: Boolean,
     val requiredRoleOid: String,
+    val storage: AslStorage,
+    val revocationChecker: RevocationChecker,
 )
 
 internal data class CertValidationBundle(
     val http: HttpContext,
     val certDataFetcher: AslCertDataApi,
+    val certDataCache: AslStorage,
     val certChainValidator: X509CertValidator = X509CertValidator(),
-    val ocspValidator: OcspHandlerImpl = OcspHandlerImpl(),
+    val ocspValidator: RevocationHandlerImpl = RevocationHandlerImpl(),
     val ecdhSigner: EcdhSigner = EcdhSigner(),
     val tiTrustAnchors: List<ByteArray>,
+    val revocationChecker: RevocationChecker,
 )

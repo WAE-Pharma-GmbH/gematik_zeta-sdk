@@ -91,11 +91,16 @@ public fun PrescriptionListComponent() {
     ) {
         attestationStatus?.let { AttestationBanner(it) }
 
-        Row(modifier = Modifier.padding(horizontal = 8.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Button(onClick = viewModel::loadPrescriptionList) {
                 Text("Load")
             }
-            Spacer(modifier = Modifier.width(8.dp))
             Button(
                 onClick = { showAddPrescription = !showAddPrescription },
                 enabled = isEnabled,
@@ -103,18 +108,24 @@ public fun PrescriptionListComponent() {
                 Text("Add")
             }
             Spacer(modifier = Modifier.weight(1f))
+            Button(onClick = viewModel::doDiscovery) {
+                Text("Discover")
+            }
+            Button(onClick = viewModel::doRegistration) {
+                Text("Register")
+            }
+            Button(onClick = viewModel::doAuthentication) {
+                Text("Authenticate")
+            }
             Button(onClick = viewModel::logoutAuthorization) {
                 Text("Logout")
             }
-            Spacer(modifier = Modifier.width(8.dp))
             Button(onClick = viewModel::forgetRegistration) {
                 Text("Clear Registration")
             }
-            Spacer(modifier = Modifier.width(8.dp))
             Button(onClick = viewModel::forgetAuthorization) {
                 Text("Forget")
             }
-            Spacer(modifier = Modifier.width(8.dp))
             Button(onClick = viewModel::statusSdk) {
                 Text("Status")
             }

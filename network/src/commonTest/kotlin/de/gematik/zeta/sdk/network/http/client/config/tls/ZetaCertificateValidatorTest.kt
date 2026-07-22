@@ -43,6 +43,16 @@ class ZetaCertificateValidatorTest {
         notAfter = 2000,
     )
 
+    private fun rsaCert(keySize: Int, sigAlgName: String = "SHA256WITHRSA", subjectDN: String = "CN=rsa-chain") =
+        ZetaCertInfo(
+            subjectDN = subjectDN,
+            sigAlgName = sigAlgName,
+            keyAlgorithm = "RSA",
+            keySize = keySize,
+            notBefore = 0,
+            notAfter = 2000,
+        )
+
     @Test
     fun validate_withValidEcCert_returnsIsValidTrue() {
         // Arrange
@@ -231,14 +241,29 @@ class ZetaCertificateValidatorTest {
     }
 
     @Test
-    fun ZetaCertificateAlgorithms_ALLOWED_SIGNATURE_ALGORITHMS_containsExpectedAlgorithms() {
+    fun ZetaCertificateAlgorithms_ALLOWED_SIGNATURE_ALGORITHMS_EE_containsExpectedAlgorithms() {
         // Arrange & Act
-        val allowed = ZetaCertificateValidator.ZetaCertificateAlgorithms.ALLOWED_SIGNATURE_ALGORITHMS
+        val allowedEe = ZetaCertificateValidator.ZetaCertificateAlgorithms.ALLOWED_SIGNATURE_ALGORITHMS_EE
 
         // Assert
-        assertEquals(2, allowed.size)
-        assertTrue("SHA256WITHECDSA" in allowed)
-        assertTrue("SHA384WITHECDSA" in allowed)
+        assertEquals(2, allowedEe.size)
+        assertTrue("SHA256WITHECDSA" in allowedEe)
+        assertTrue("SHA384WITHECDSA" in allowedEe)
+    }
+
+    @Test
+    fun ZetaCertificateAlgorithms_ALLOWED_SIGNATURE_ALGORITHMS_CHAIN_containsExpectedAlgorithms() {
+        // Arrange & Act
+        val allowedChain = ZetaCertificateValidator.ZetaCertificateAlgorithms.ALLOWED_SIGNATURE_ALGORITHMS_CHAIN
+
+        // Assert
+        assertEquals(6, allowedChain.size)
+        assertTrue("SHA256WITHECDSA" in allowedChain)
+        assertTrue("SHA384WITHECDSA" in allowedChain)
+        assertTrue("SHA512WITHECDSA" in allowedChain)
+        assertTrue("SHA256WITHRSA" in allowedChain)
+        assertTrue("SHA384WITHRSA" in allowedChain)
+        assertTrue("SHA512WITHRSA" in allowedChain)
     }
 
     @Test
@@ -258,5 +283,128 @@ class ZetaCertificateValidatorTest {
     fun ZetaCertificateAlgorithms_MIN_EC_KEY_BITS_value_is256() {
         // Arrange & Act & Assert
         assertEquals(256, ZetaCertificateValidator.ZetaCertificateAlgorithms.MIN_EC_KEY_BITS)
+    }
+
+    @Test
+    fun validate_withRsaChainKeyTooSmall_returnsIsValidFalse() {
+        // Arrange
+        val cert = rsaCert(keySize = ZetaCertificateValidator.ZetaCertificateAlgorithms.MIN_RSA_KEY_BITS - 1)
+
+        // Act
+        val result = ZetaCertificateValidator.validate(cert, now, isLeaf = false)
+
+        // Assert
+        assertFalse(result.isValid)
+        assertTrue(result.errors.any { "RSA key too small" in it })
+        assertTrue(
+            result.errors.any {
+                it.contains("${ZetaCertificateValidator.ZetaCertificateAlgorithms.MIN_RSA_KEY_BITS - 1}") &&
+                    it.contains("${ZetaCertificateValidator.ZetaCertificateAlgorithms.MIN_RSA_KEY_BITS}") &&
+                    it.contains(cert.subjectDN)
+            },
+        )
+    }
+
+    @Test
+    fun validate_withRsaChainKeyAtMinimum_returnsIsValidTrue() {
+        // Arrange
+        val cert = rsaCert(keySize = ZetaCertificateValidator.ZetaCertificateAlgorithms.MIN_RSA_KEY_BITS)
+
+        // Act
+        val result = ZetaCertificateValidator.validate(cert, now, isLeaf = false)
+
+        // Assert
+        assertTrue(result.isValid, "expected valid, got errors: ${result.errors}")
+    }
+
+    @Test
+    fun validate_withRsaChainKeyAboveMinimum_returnsIsValidTrue() {
+        // Arrange
+        val cert = rsaCert(keySize = ZetaCertificateValidator.ZetaCertificateAlgorithms.MIN_RSA_KEY_BITS + 1024)
+
+        // Act
+        val result = ZetaCertificateValidator.validate(cert, now, isLeaf = false)
+
+        // Assert
+        assertTrue(result.isValid, "expected valid, got errors: ${result.errors}")
+    }
+
+    @Test
+    fun validate_withRsaLeafKeyTooSmall_rejectedForKeyAlgorithmNotRsaKeySize() {
+        val cert = rsaCert(keySize = 512)
+
+        // Act
+        val result = ZetaCertificateValidator.validate(cert, now)
+
+        // Assert
+        assertFalse(result.isValid)
+        assertTrue(result.errors.any { "not allowed for leaf cert" in it })
+        assertFalse(result.errors.any { "RSA key too small" in it })
+    }
+
+    @Test
+    fun validate_withHostNull_skipsSanValidation() {
+        // Arrange
+        val cert = validEcCert().copy(san = emptyList())
+
+        // Act
+        val result = ZetaCertificateValidator.validate(cert, now)
+
+        // Assert
+        assertTrue(result.isValid, "expected valid, got errors: ${result.errors}")
+    }
+
+    @Test
+    fun validate_withHostMatchingExactSan_returnsIsValidTrue() {
+        // Arrange
+        val cert = validEcCert().copy(san = listOf("example.com"))
+
+        // Act
+        val result = ZetaCertificateValidator.validate(cert, now, host = "example.com")
+
+        // Assert
+        assertTrue(result.isValid, "expected valid, got errors: ${result.errors}")
+    }
+
+    @Test
+    fun validate_withHostNotInSan_returnsIsValidFalse() {
+        // Arrange
+        val cert = validEcCert().copy(san = listOf("example.com"))
+
+        // Act
+        val result = ZetaCertificateValidator.validate(cert, now, host = "not-example.com")
+
+        // Assert
+        assertFalse(result.isValid)
+        assertTrue(
+            result.errors.any {
+                "Certificate SAN does not match host" in it && "not-example.com" in it
+            },
+        )
+    }
+
+    @Test
+    fun validate_withEmptySanList_andHostProvided_returnsIsValidFalse() {
+        // Arrange
+        val cert = validEcCert().copy(san = emptyList())
+
+        // Act
+        val result = ZetaCertificateValidator.validate(cert, now, host = "example.com")
+
+        // Assert
+        assertFalse(result.isValid)
+        assertTrue(result.errors.any { "Certificate SAN does not match host" in it })
+    }
+
+    @Test
+    fun validate_withMultipleSanEntries_matchesAnyOfThem() {
+        // Arrange
+        val cert = validEcCert().copy(san = listOf("other.example.com", "example.com", "another.example.com"))
+
+        // Act
+        val result = ZetaCertificateValidator.validate(cert, now, host = "example.com")
+
+        // Assert
+        assertTrue(result.isValid, "expected valid, got errors: ${result.errors}")
     }
 }

@@ -126,7 +126,7 @@ public sealed class ZetaClient : IDisposable
         return ZetaSdkNative.ZetaSdk_clearRegistration(_ptr);
     }
 
-    public void OpenWebSocket(
+    public int OpenWebSocket(
         string url,
         IReadOnlyDictionary<string, string>? headers,
         Action<WsSession> handler)
@@ -147,6 +147,17 @@ public sealed class ZetaClient : IDisposable
 
         ZetaSdkNative.ZetaSdk_Client_ws(_ptr, urlPtr, urlBytes.Length, handlerPtr, hdrPtr, hdrLen);
         GC.KeepAlive(nativeDelegate);
+
+        return GetLastError() == null ? 0 : -1;
+    }
+
+    public static string? GetLastError()
+    {
+        var ptr = ZetaSdkNative.ZetaSdk_getLastError();
+        if (ptr == IntPtr.Zero) return null;
+        var message = Marshal.PtrToStringUTF8(ptr);
+        ZetaSdkNative.ZetaSdk_freeLastError(ptr);
+        return message;
     }
 
     public void Dispose()

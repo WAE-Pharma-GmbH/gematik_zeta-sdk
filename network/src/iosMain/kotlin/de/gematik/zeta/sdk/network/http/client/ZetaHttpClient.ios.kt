@@ -30,7 +30,7 @@ import io.ktor.client.HttpClientConfig
 import io.ktor.client.engine.darwin.Darwin
 import kotlin.Unit
 
-internal actual fun buildPlatformClient(cfg: ClientConfig, commonSetup: HttpClientConfig<*>.() -> Unit): HttpClient {
+internal actual fun buildPlatformClient(cfg: ClientConfig, dependencies: HttpClientDependencies, commonSetup: HttpClientConfig<*>.() -> Unit): HttpClient {
     return HttpClient(Darwin) {
         this.apply {
             commonSetup(this)

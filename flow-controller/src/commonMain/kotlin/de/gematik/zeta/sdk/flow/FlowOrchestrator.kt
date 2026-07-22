@@ -140,7 +140,7 @@ class FlowOrchestrator(
 
                 is FlowDirective.Abort -> {
                     Log.e { "ABORT: ${directive.error.message}, iteration=$iteration" }
-                    return resp.raw.call
+                    throw directive.error
                 }
             }
 

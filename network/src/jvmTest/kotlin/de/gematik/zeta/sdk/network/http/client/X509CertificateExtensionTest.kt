@@ -55,6 +55,7 @@ class X509CertificateExtensionTest {
         every { cert.sigAlgName } returns "SHA256withECDSA"
         every { cert.notBefore } returns Date(1000000)
         every { cert.notAfter } returns Date(9000000)
+        every { cert.subjectAlternativeNames } returns listOf(listOf(2, "test.example.com"))
         return cert
     }
 
@@ -69,6 +70,7 @@ class X509CertificateExtensionTest {
         every { cert.sigAlgName } returns "SHA256withRSA"
         every { cert.notBefore } returns Date(1000000)
         every { cert.notAfter } returns Date(9000000)
+        every { cert.subjectAlternativeNames } returns listOf(listOf(2, "test.example.com"))
         return cert
     }
 
@@ -82,6 +84,7 @@ class X509CertificateExtensionTest {
         every { cert.sigAlgName } returns "SHA256withDSA"
         every { cert.notBefore } returns Date(1000000)
         every { cert.notAfter } returns Date(9000000)
+        every { cert.subjectAlternativeNames } returns listOf(listOf(2, "test.example.com"))
         return cert
     }
 

@@ -46,10 +46,11 @@ public data class ZetaCertInfo(
 
 public object ZetaCertificateValidator {
     public object ZetaCertificateAlgorithms {
-        public val ALLOWED_SIGNATURE_ALGORITHMS: Set<String> = setOf(
-            "SHA256WITHECDSA",
-            "SHA384WITHECDSA",
-        )
+        public val ALLOWED_SIGNATURE_ALGORITHMS_EE: Set<String> =
+            ZetaSignatureAlgorithms.ALLOWED_LEAF_CERT_SIG_ALGS
+        public val ALLOWED_SIGNATURE_ALGORITHMS_CHAIN: Set<String> =
+            ZetaSignatureAlgorithms.ALLOWED_CERT_SIG_ALGS
+
         public val FORBIDDEN_SIGNATURE_ALGORITHMS: Set<String> = setOf(
             "SHA1WITHECDSA",
             "SHA1WITHRSA",
@@ -61,6 +62,15 @@ public object ZetaCertificateValidator {
 
         public const val EC_P256_KEY_SIZE_BITS: Int = 256
         public const val EC_P384_KEY_SIZE_BITS: Int = 384
+
+        /* Note:
+            The MIN_RSA_KEY_BITS value below is against the BSI TR recommendation for RSA key lengths of at least 3000 bits.
+            FOr Leaf / EE Certificates, RSA is completely forbidden anyway, see ALLOWED_LEAF in ZetaSignatureAlgorithms.kt resp. the
+            method validateKeyAlgorithm() below.
+            However, some PKI CA certificates still use this key length in their CA chain for TLS certificates.
+            So, we need to allow keys with 2048 bits here.
+         */
+        public const val MIN_RSA_KEY_BITS: Int = 2048
         public const val MIN_EC_KEY_BITS: Int = EC_P256_KEY_SIZE_BITS
     }
 
@@ -81,11 +91,21 @@ public object ZetaCertificateValidator {
 
     private fun validateSignatureAlgorithm(cert: ZetaCertInfo, isLeaf: Boolean): List<String> {
         val sigAlg = cert.sigAlgName.normalize()
-        return when {
-            sigAlg in ZetaCertificateAlgorithms.FORBIDDEN_SIGNATURE_ALGORITHMS ->
+        val allowedForDepth = if (isLeaf) {
+            ZetaCertificateAlgorithms.ALLOWED_SIGNATURE_ALGORITHMS_EE
+        } else {
+            ZetaCertificateAlgorithms.ALLOWED_SIGNATURE_ALGORITHMS_CHAIN
+        }
+        return when (sigAlg) {
+            in ZetaCertificateAlgorithms.FORBIDDEN_SIGNATURE_ALGORITHMS ->
                 listOf("Forbidden signature algorithm '${cert.sigAlgName}' in cert: ${cert.subjectDN}")
-            isLeaf && sigAlg !in ZetaCertificateAlgorithms.ALLOWED_SIGNATURE_ALGORITHMS ->
-                listOf("Signature algorithm '${cert.sigAlgName}' is not allowed")
+
+            !in allowedForDepth ->
+                listOf(
+                    "Signature algorithm '${cert.sigAlgName}' is not allowed for " +
+                        "${if (isLeaf) "leaf" else "chain"} cert: ${cert.subjectDN}",
+                )
+
             else -> emptyList()
         }
     }
@@ -93,7 +113,12 @@ public object ZetaCertificateValidator {
     private fun validateKeyAlgorithm(cert: ZetaCertInfo, isLeaf: Boolean): List<String> =
         when (cert.keyAlgorithm.uppercase()) {
             "EC" -> validateEcKey(cert)
-            else -> if (isLeaf) listOf("Key algorithm '${cert.keyAlgorithm}' is not allowed") else emptyList()
+            "RSA" -> if (isLeaf) {
+                listOf("Key algorithm 'RSA' is not allowed for leaf cert: ${cert.subjectDN}")
+            } else {
+                validateRsaKey(cert)
+            }
+            else -> listOf("Key algorithm '${cert.keyAlgorithm}' is not allowed: ${cert.subjectDN}")
         }
 
     private fun validateEcKey(cert: ZetaCertInfo): List<String> = buildList {
@@ -105,6 +130,15 @@ public object ZetaCertificateValidator {
             else -> if (cert.curveName.normalize() !in ALLOWED_CURVES_NORMALIZED) {
                 add("EC curve '${cert.curveName}' is not allowed")
             }
+        }
+    }
+
+    private fun validateRsaKey(cert: ZetaCertInfo): List<String> = buildList {
+        if (cert.keySize < ZetaCertificateAlgorithms.MIN_RSA_KEY_BITS) {
+            add(
+                "RSA key too small: ${cert.keySize} " +
+                    "(min: ${ZetaCertificateAlgorithms.MIN_RSA_KEY_BITS}) in cert: ${cert.subjectDN}",
+            )
         }
     }
 
@@ -123,11 +157,13 @@ public object ZetaCertificateValidator {
     public fun validateChain(
         chain: List<ZetaCertInfo>,
         nowEpochSeconds: Long,
+        host: String? = null,
     ): CertificateValidationResult {
         val results = chain.mapIndexed { index, cert ->
             validate(
                 cert = cert,
                 nowEpochSeconds = nowEpochSeconds,
+                host = if (index == 0) host else null,
                 isLeaf = index == 0,
             )
         }

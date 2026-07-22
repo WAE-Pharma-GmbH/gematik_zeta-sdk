@@ -1182,6 +1182,8 @@ Cookies are cleared when close() is called.
 
 This object allows adding additional CAs that are validated against for the TLS certificate.
 
+On Windows, the SDK additionally injects CAs from the Windows Certificate Store automatically.
+
 #### MonitoringConfig
 
 This object determines the log level for backend requests.

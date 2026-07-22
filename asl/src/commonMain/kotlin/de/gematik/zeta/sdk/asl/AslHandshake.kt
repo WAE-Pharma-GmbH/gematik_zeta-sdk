@@ -40,6 +40,7 @@ import de.gematik.zeta.sdk.authentication.AccessTokenProvider
 import de.gematik.zeta.sdk.authentication.HttpAuthHeaders
 import de.gematik.zeta.sdk.crypto.EcdhP256Kem
 import de.gematik.zeta.sdk.crypto.ML768Kem
+import de.gematik.zeta.sdk.network.http.client.RevocationChecker
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
 import de.gematik.zeta.sdk.tpm.TpmProvider
 import io.ktor.client.request.HttpRequestBuilder
@@ -62,7 +63,8 @@ public data class AslHandshakeState(
     val accessTokenProvider: AccessTokenProvider,
     val tpmProvider: TpmProvider,
     val tlsValidation: Boolean = true,
-    val resource: String,
+    val revocationChecker: RevocationChecker,
+    val storage: AslStorage,
 ) {
     public companion object {
         public fun create(
@@ -71,7 +73,8 @@ public data class AslHandshakeState(
             accessTokenProvider: AccessTokenProvider,
             tpmProvider: TpmProvider,
             tlsValidation: Boolean,
-            resource: String,
+            storage: AslStorage,
+            revocationChecker: RevocationChecker,
         ): AslHandshakeState {
             return AslHandshakeState(
                 request = request,
@@ -81,7 +84,8 @@ public data class AslHandshakeState(
                 accessTokenProvider = accessTokenProvider,
                 tpmProvider = tpmProvider,
                 tlsValidation = tlsValidation,
-                resource = resource,
+                storage = storage,
+                revocationChecker = revocationChecker,
             )
         }
     }
@@ -115,7 +119,7 @@ public suspend fun AslHandshakeState.processMessage2AndBuildMessage3(aslProdEnvi
         resultMessage1 = message1Result,
         kem = KemBundle(mlKem, ecdhKem),
         http = HttpContext(httpClient, request, tlsValidation),
-        asl = AslContext(aslProdEnvironment, requiredRoleOid),
+        asl = AslContext(aslProdEnvironment, requiredRoleOid, storage, revocationChecker),
     )
 
     val keyConfCipherText = encryptKeyConfirmation(

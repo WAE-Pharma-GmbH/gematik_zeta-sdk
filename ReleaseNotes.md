@@ -1,7 +1,7 @@
 
 # RELEASE NOTES
 
-## Version: v1.2.0
+## Version: v1.2.5
 
 This version implements the ZETA protocol for the ZETA client SDK.
 
@@ -30,6 +30,40 @@ It provides SDK bindings for kotlin (as original implementation), Java, and C++.
 - C# client build
 
 ### Known issues:
+
+## Changes in 1.2.5 (from 1.2.4)
+
+- Fix regression in JVM revocation checker
+- Use correct timestamp for OCSP cache time
+
+## Changes in 1.2.4 (from 1.2.3)
+
+- RSA key length adapted to requirements for gematik PKI CA infrastructure
+
+## Changes in 1.2.3 (from 1.2.2)
+
+### New Features
+
+- Demo App has more options regarding TLS (burger menu with
+  option to enable/disable TLS validation, upload CA files)
+  Also now has buttons for explicit discovery, registration, and authentication
+
+### Behavioral Changes
+
+- Adaption of the validation of the TLS certificate chain to achieve compatibility
+  with the gematik PKI CA infrastructure. This mainly affects the ASL functionality.
+
+### Bug Fixes
+
+- Caching for TLS/ASL revocation and trust data (OCSP, CRL, ASL certificates)
+- ASL error handling (parsing json vs. cbor)
+- TLS validation error in C++/C# on windows - using the Windows Certificate store now
+- Certificate chain revocation now properly verified for both ASL and TLS
+- ANFTI2-636: Fixed Linux shared-lib compilation error (missing -fPIC flag)
+- ANFTI2-678: Expose Status to Java client
+- ANFTI2-740: Fixed malformed URL in service discovery error logs
+- ANFTI2-744: discover/register/authenticate propagate CapabilityResult.Error as a failed Result
+- ANFTI2-753: C++ Correct Headers count
 
 ## Changes in 1.2.2 (from 1.2.0)
 

@@ -66,6 +66,7 @@ import kotlinx.cinterop.UByteVar
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.asStableRef
 import kotlinx.cinterop.cstr
+import kotlinx.cinterop.free
 import kotlinx.cinterop.get
 import kotlinx.cinterop.invoke
 import kotlinx.cinterop.memScoped
@@ -425,6 +426,7 @@ fun ZetaHttpResponse_destroy(
             it?.key?.let { free(it) }
             it?.value?.let { free(it) }
         }
+        httpResponse.headers?.let { nativeHeap.free(it) }
     }
     nativeHeap.free(httpResponse.rawValue)
 }

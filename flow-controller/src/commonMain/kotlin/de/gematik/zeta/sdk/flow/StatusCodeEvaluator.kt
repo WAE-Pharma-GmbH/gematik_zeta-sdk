@@ -34,7 +34,6 @@ class StatusCodeEvaluator : ResponseEvaluator {
     override suspend fun evaluate(call: HttpClientCall, ctx: FlowContext, retryState: FlowOrchestrator.RetryState): FlowDirective {
         return when (val status = call.response.status.value) {
             in 200..299 -> FlowDirective.Proceed(call.response)
-            400 -> FlowDirective.Abort(call.response, ZetaClientError.BadRequest())
             401, 403 -> {
                 if (!retryState.hasAttemptedStepUp) {
                     retryState.hasAttemptedStepUp = true
@@ -44,9 +43,7 @@ class StatusCodeEvaluator : ResponseEvaluator {
                     FlowDirective.Abort(call.response, ZetaClientError.StepUpFailed())
                 }
             }
-            404 -> FlowDirective.Abort(call.response, ZetaClientError.NotFound())
-            405 -> FlowDirective.Abort(call.response, ZetaClientError.MethodNotAllowed())
-            409 -> FlowDirective.Abort(call.response, ZetaClientError.Conflict())
+            400, 404, 405, 409 -> FlowDirective.Proceed(call.response)
             429 -> {
                 val retryAfterMs = call.response.headers["retry-after"]
                     ?.toLongOrNull()

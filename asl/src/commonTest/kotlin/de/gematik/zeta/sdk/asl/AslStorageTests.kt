@@ -175,6 +175,140 @@ class AslStorageImplTest {
         assertTrue(stored.containsKey("other_key_2"))
     }
 
+    @Test
+    fun saveCachedCertData_storesAndReturnsCertData() = runTest {
+        // Arrange
+        val (sut, _) = buildSut()
+        val certData = buildCertData()
+
+        // Act
+        sut.saveCachedCertData("abc123", 1, certData)
+        val result = sut.getCachedCertData("abc123", 1)
+
+        // Assert
+        assertEquals(certData.cert.toList(), result!!.cert.toList())
+        assertEquals(certData.ca.toList(), result.ca.toList())
+        assertEquals(certData.rcaChain.map { it.toList() }, result.rcaChain.map { it.toList() })
+    }
+
+    @Test
+    fun getCachedCertData_returnsNull_whenCacheMiss() = runTest {
+        // Arrange
+        val (sut, _) = buildSut()
+
+        // Act
+        val result = sut.getCachedCertData("missing", 1)
+
+        // Assert
+        assertNull(result)
+    }
+
+    @Test
+    fun getCachedCertData_usesHashAndVersionAsCacheKey() = runTest {
+        // Arrange
+        val (sut, _) = buildSut()
+        val certV1 = buildCertData(certFirstByte = 1)
+        val certV2 = buildCertData(certFirstByte = 2)
+
+        // Act
+        sut.saveCachedCertData("same-hash", 1, certV1)
+        sut.saveCachedCertData("same-hash", 2, certV2)
+
+        // Assert
+        assertEquals(1, sut.getCachedCertData("same-hash", 1)!!.cert.first())
+        assertEquals(2, sut.getCachedCertData("same-hash", 2)!!.cert.first())
+    }
+
+    @Test
+    fun getCachedCertData_usesHashAsCacheKey() = runTest {
+        // Arrange
+        val (sut, _) = buildSut()
+        val certA = buildCertData(certFirstByte = 10)
+        val certB = buildCertData(certFirstByte = 20)
+
+        // Act
+        sut.saveCachedCertData("hash-a", 1, certA)
+        sut.saveCachedCertData("hash-b", 1, certB)
+
+        // Assert
+        assertEquals(10, sut.getCachedCertData("hash-a", 1)!!.cert.first())
+        assertEquals(20, sut.getCachedCertData("hash-b", 1)!!.cert.first())
+    }
+
+    @Test
+    fun saveCachedCertData_doesNotOverwriteSession() = runTest {
+        // Arrange
+        val (sut, _) = buildSut()
+        val session = buildSession(requestCounter = 123L)
+        sut.saveSession(session)
+
+        // Act
+        sut.saveCachedCertData("abc123", 1, buildCertData())
+
+        // Assert
+        assertEquals(123L, sut.getCurrentSession()!!.requestCounter)
+    }
+
+    @Test
+    fun clear_removesCachedCertData() = runTest {
+        // Arrange
+        val (sut, _) = buildSut()
+        sut.saveCachedCertData("abc123", 1, buildCertData())
+
+        // Act
+        sut.clear()
+
+        // Assert
+        assertNull(sut.getCachedCertData("abc123", 1))
+    }
+
+    @Test
+    fun clear_removesSessionAndCachedCertData() = runTest {
+        // Arrange
+        val (sut, _) = buildSut()
+        sut.saveSession(buildSession())
+        sut.saveCachedCertData("abc123", 1, buildCertData())
+
+        // Act
+        sut.clear()
+
+        // Assert
+        assertNull(sut.getCurrentSession())
+        assertNull(sut.getCachedCertData("abc123", 1))
+    }
+
+    @Test
+    fun clear_removesOnlyAslData_mixedStorageWithCertCache() = runTest {
+        // Arrange
+        val storage = FakeSdkStorage()
+        storage.put("other_key_1", "value1")
+        storage.put("other_key_2", "value2")
+
+        val (sut, _) = buildSut(storage)
+        sut.saveSession(buildSession())
+        sut.saveCachedCertData("abc123", 1, buildCertData())
+
+        // Act
+        sut.clear()
+
+        // Assert
+        val stored = storage.getAll()
+        assertEquals(2, stored.size)
+        assertTrue(stored.containsKey("other_key_1"))
+        assertTrue(stored.containsKey("other_key_2"))
+    }
+
+    private fun buildCertData(
+        certFirstByte: Byte = 1,
+    ): CertData = CertData(
+        cert = byteArrayOf(certFirstByte, 2, 3),
+        ca = byteArrayOf(4, 5, 6),
+        rcaChain = listOf(
+            byteArrayOf(7, 8, 9),
+            byteArrayOf(10, 11, 12),
+        ),
+    )
+
     private class FakeSdkStorage : SdkStorage {
         private val store = mutableMapOf<String, String>()
         override suspend fun get(key: String): String? = store[key]

@@ -62,6 +62,11 @@ import kotlin.test.assertTrue
  * Unit tests for [zetaHttpClient].
  */
 class ZetaHttpClientTests {
+
+    private val noDependencies = HttpClientDependencies(
+        revocationChecker = null,
+    )
+
     @Test
     fun testBaseUrlAppliedToRelativeRequests() = runTest {
         // Arrange
@@ -308,7 +313,7 @@ class ZetaHttpClientTests {
         val engine = MockEngine { error("error") }
         // Act + Assert
         assertFailsWith<Throwable> {
-            zetaHttpClient({ ZetaHttpClientBuilder().build(engine) })
+            zetaHttpClient({ ZetaHttpClientBuilder().build(engine) }, dependencies = noDependencies)
                 .get("/")
         }
     }
@@ -881,6 +886,7 @@ class ZetaHttpClientTests {
         // Arrange & Act
         val client = zetaHttpClient(
             configure = { contentNegotiation = true },
+            dependencies = noDependencies,
         )
 
         // Assert
@@ -902,6 +908,7 @@ class ZetaHttpClientTests {
             addExtras = {
                 extrasApplied = true
             },
+            dependencies = noDependencies,
         )
 
         // Assert
@@ -919,6 +926,7 @@ class ZetaHttpClientTests {
             configure = {
                 engineFactory = { mockEngine }
             },
+            dependencies = noDependencies,
         )
 
         // Assert
@@ -1323,6 +1331,7 @@ class ZetaHttpClientTests {
         // Arrange & Act
         val client = zetaHttpClient(
             configure = { contentNegotiation = true },
+            dependencies = noDependencies,
         )
 
         // Assert
@@ -1336,6 +1345,7 @@ class ZetaHttpClientTests {
         // Arrange & Act
         val client = zetaHttpClient(
             configure = { contentNegotiation = true },
+            dependencies = noDependencies,
         )
 
         // Assert

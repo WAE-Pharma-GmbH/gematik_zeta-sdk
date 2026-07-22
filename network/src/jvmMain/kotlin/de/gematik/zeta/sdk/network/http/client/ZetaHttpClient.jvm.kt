@@ -28,7 +28,6 @@ import de.gematik.zeta.logging.Log
 import de.gematik.zeta.sdk.network.http.client.config.ClientConfig
 import de.gematik.zeta.sdk.network.http.client.config.ProxyConfig
 import de.gematik.zeta.sdk.network.http.client.config.ProxyType
-import de.gematik.zeta.sdk.network.http.client.config.SecurityConfig
 import de.gematik.zeta.sdk.network.http.client.config.tls.ZetaCipherSuites
 import de.gematik.zeta.sdk.network.http.client.config.tls.ZetaTlsProtocols.TLS_1_2
 import de.gematik.zeta.sdk.network.http.client.config.tls.ZetaTrustManager
@@ -51,6 +50,7 @@ import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocketFactory
+import javax.net.ssl.TrustManager
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 import kotlin.time.Duration.Companion.seconds
@@ -86,6 +86,7 @@ import kotlin.time.Duration.Companion.seconds
  */
 internal actual fun buildPlatformClient(
     cfg: ClientConfig,
+    dependencies: HttpClientDependencies,
     commonSetup: HttpClientConfig<*>.() -> Unit,
 ): HttpClient {
     val serverValidationDisabled = cfg.security.disableServerValidation
@@ -95,7 +96,7 @@ internal actual fun buildPlatformClient(
         System.setProperty("javax.net.debug", "ssl:handshake")
     }
 
-    val (socketFactory, trustManager) = buildTlsComponents(cfg.security)
+    val (socketFactory, trustManager) = buildTlsComponents(cfg, dependencies)
 
     val okClient = OkHttpClient.Builder()
         .applyHostnameVerifier(serverValidationDisabled)
@@ -117,11 +118,11 @@ internal actual fun buildPlatformClient(
     }
 }
 
-private fun buildTlsComponents(securityConfig: SecurityConfig): Pair<SSLSocketFactory, X509TrustManager> =
-    if (securityConfig.disableServerValidation) {
+private fun buildTlsComponents(cfg: ClientConfig, dependencies: HttpClientDependencies): Pair<SSLSocketFactory, X509TrustManager> =
+    if (cfg.security.disableServerValidation) {
         buildInsecureTls()
     } else {
-        buildSecureTls(securityConfig)
+        buildSecureTls(cfg, dependencies)
     }
 
 private fun buildInsecureTls(): Pair<SSLSocketFactory, X509TrustManager> {
@@ -133,14 +134,14 @@ private fun buildInsecureTls(): Pair<SSLSocketFactory, X509TrustManager> {
     return sslContext.socketFactory to trustAll
 }
 
-private fun buildSecureTls(securityConfig: SecurityConfig): Pair<SSLSocketFactory, X509TrustManager> {
+private fun buildSecureTls(cfg: ClientConfig, dependencies: HttpClientDependencies): Pair<SSLSocketFactory, X509TrustManager> {
     val certFactory = CertificateFactory.getInstance("X.509")
     val extraCerts = buildList {
-        securityConfig.additionalCaPem.forEach { pem ->
+        cfg.security.additionalCaPem.forEach { pem ->
             certFactory.generateCertificates(ByteArrayInputStream(pem.toByteArray()))
                 .forEach { add(it as X509Certificate) }
         }
-        securityConfig.additionalCaFile?.let { path ->
+        cfg.security.additionalCaFile?.let { path ->
             File(path).inputStream().use { input ->
                 certFactory.generateCertificates(input)
                     .forEach { add(it as X509Certificate) }
@@ -159,12 +160,16 @@ private fun buildSecureTls(securityConfig: SecurityConfig): Pair<SSLSocketFactor
     tmf.init(keyStore)
     val baseTrustManager = tmf.trustManagers.filterIsInstance<X509TrustManager>().first()
 
-    val zetaTrustManager = ZetaTrustManager(baseTrustManager)
+    val zetaTrustManager = ZetaTrustManager(
+        delegate = baseTrustManager,
+        revocationChecker = dependencies.revocationChecker,
+    )
+
     val sslContext = SSLContext.getInstance(TLS_1_2).apply {
-        init(null, arrayOf(zetaTrustManager), SecureRandom())
+        init(null, arrayOf<TrustManager>(zetaTrustManager), SecureRandom())
     }
 
-    val socketFactory = ZetaSslSocketFactory(sslContext.socketFactory, zetaTrustManager)
+    val socketFactory = ZetaSslSocketFactory(sslContext.socketFactory)
 
     return socketFactory to zetaTrustManager
 }

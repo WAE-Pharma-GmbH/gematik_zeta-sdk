@@ -130,7 +130,7 @@ public fun String.toOpenSslName(): String {
 }
 
 public fun sanMatchesHost(san: String, host: String): Boolean {
-    if (san.lowercase() == host.lowercase()) return true
+    if (san.equals(host, ignoreCase = true)) return true
 
     if (san.startsWith("*.")) {
         val sanSuffix = san.removePrefix("*.")

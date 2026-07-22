@@ -54,6 +54,21 @@ public class PrescriptionListViewModel(
         state.update { PrescriptionListState.Result(list) }
     }
 
+    internal fun doAuthentication() = launch(ioDispatcher) {
+        repository.doAuthentication()
+        state.update { PrescriptionListState.Result(list) }
+    }
+
+    internal fun doRegistration() = launch(ioDispatcher) {
+        repository.doRegistration()
+        state.update { PrescriptionListState.Result(list) }
+    }
+
+    internal fun doDiscovery() = launch(ioDispatcher) {
+        repository.doDiscovery()
+        state.update { PrescriptionListState.Result(list) }
+    }
+
     internal fun forgetAuthorization() = launch(ioDispatcher) {
         repository.forgetAuthorization()
         state.update { PrescriptionListState.Result(list) }
