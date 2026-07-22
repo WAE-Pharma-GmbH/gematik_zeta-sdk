@@ -28,11 +28,24 @@ import de.gematik.zeta.logging.Log
 import de.gematik.zeta.sdk.storage.ExtendedStorage
 import de.gematik.zeta.sdk.storage.ResourceScope
 import de.gematik.zeta.sdk.storage.SdkStorage
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 public interface AslStorage {
     public suspend fun saveSession(session: EstablishedSession)
     public suspend fun getCurrentSession(): EstablishedSession?
+
+    public suspend fun getCachedCertData(
+        certificateHashHex: String,
+        certificateDescriptionVersion: Int,
+    ): CertData?
+
+    public suspend fun saveCachedCertData(
+        certificateHashHex: String,
+        certificateDescriptionVersion: Int,
+        certData: CertData,
+    )
+
     public suspend fun clear()
 }
 
@@ -45,6 +58,8 @@ public class AslStorageImpl(
         public const val PREFIX: String = "asl_session_by_resource"
         public const val INDEX_KEY: String = "asl_session_index"
         public const val ENTRY_KEY: String = "asl_session"
+        public const val CERT_CACHE_INDEX_KEY: String = "asl_cert_cache_index"
+        public const val CERT_CACHE_PREFIX: String = "asl_cert_cache"
     }
 
     private val extended = ExtendedStorage(storage, resourceScope)
@@ -63,5 +78,67 @@ public class AslStorageImpl(
         }
     }
 
-    override suspend fun clear(): Unit = extended.clearIndexed(INDEX_KEY, listOf(PREFIX))
+    override suspend fun getCachedCertData(
+        certificateHashHex: String,
+        certificateDescriptionVersion: Int,
+    ): CertData? {
+        val key = certCacheEntryKey(certificateHashHex, certificateDescriptionVersion)
+
+        Log.d { "Getting cached ASL certificate data: $key" }
+
+        val value = extended.getIndexed(key, CERT_CACHE_PREFIX) ?: return null
+
+        return runCatching {
+            val cached = json.decodeFromString<CachedCertData>(value)
+
+            CertData(
+                cert = cached.cert,
+                ca = cached.ca,
+                rcaChain = cached.rcaChain,
+            )
+        }.getOrElse {
+            Log.e { "Error getting cached ASL certificate data: ${it.message}" }
+            throw it
+        }
+    }
+
+    override suspend fun saveCachedCertData(
+        certificateHashHex: String,
+        certificateDescriptionVersion: Int,
+        certData: CertData,
+    ) {
+        val key = certCacheEntryKey(certificateHashHex, certificateDescriptionVersion)
+
+        Log.d { "Saving cached ASL certificate data: $key" }
+
+        val cached = CachedCertData(
+            cert = certData.cert,
+            ca = certData.ca,
+            rcaChain = certData.rcaChain,
+        )
+
+        extended.putIndexed(
+            CERT_CACHE_INDEX_KEY,
+            key,
+            mapOf(CERT_CACHE_PREFIX to json.encodeToString(cached)),
+        )
+    }
+
+    override suspend fun clear() {
+        extended.clearIndexed(INDEX_KEY, listOf(PREFIX))
+        extended.clearIndexed(CERT_CACHE_INDEX_KEY, listOf(CERT_CACHE_PREFIX))
+    }
+
+    private fun certCacheEntryKey(
+        certificateHashHex: String,
+        certificateDescriptionVersion: Int,
+    ): String =
+        "$CERT_CACHE_PREFIX:$certificateDescriptionVersion:$certificateHashHex"
 }
+
+@Serializable
+private data class CachedCertData(
+    val cert: ByteArray,
+    val ca: ByteArray,
+    val rcaChain: List<ByteArray>,
+)

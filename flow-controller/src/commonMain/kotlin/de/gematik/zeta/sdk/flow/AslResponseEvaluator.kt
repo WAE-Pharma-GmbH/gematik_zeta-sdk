@@ -25,6 +25,7 @@
 package de.gematik.zeta.sdk.flow
 
 import de.gematik.zeta.logging.Log
+import de.gematik.zeta.sdk.asl.AslErrorMessage
 import de.gematik.zeta.sdk.asl.decodeAslError
 import io.ktor.client.call.HttpClientCall
 
@@ -43,7 +44,15 @@ class AslResponseEvaluator : ResponseEvaluator {
             }
 
             else -> {
-                val error = decodeAslError(call.response)
+                val error = runCatching { decodeAslError(call.response) }
+                    .getOrElse { cause ->
+                        Log.e(cause) { "Failed to decode ASL error body (status=${call.response.status.value})" }
+                        AslErrorMessage(
+                            messageType = "Error",
+                            errorCode = -1,
+                            errorMessage = "Unparseable ASL error response (HTTP ${call.response.status.value})",
+                        )
+                    }
                 Log.e { "Establishing ASL error [${error.errorCode}] ${error.errorMessage}" }
                 FlowDirective.Abort(call.response, ZetaClientError.AslError(error.errorCode, error.errorMessage))
             }

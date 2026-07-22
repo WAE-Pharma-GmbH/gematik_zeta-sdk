@@ -66,7 +66,7 @@ import kotlin.test.assertTrue
 @Suppress("FunctionNaming")
 class OcspHandlerTest {
 
-    private val handler = OcspHandlerImpl()
+    private val handler = RevocationHandlerImpl()
 
     init {
         if (Security.getProvider("BC") == null) {
@@ -187,10 +187,18 @@ class OcspHandlerTest {
     }
 
     @Test
-    fun `getProducedAtEpochSeconds returns correct timestamp`() {
-        val producedAt = Date(1_700_000_000_000L)
-        val ocspDer = buildOcspResponseDer(leafCert, producedAt = producedAt)
-        assertEquals(1_700_000_000L, handler.getProducedAtEpochSeconds(ocspDer))
+    fun `getThisUpdateEpochSeconds returns correct timestamp`() {
+        val thisUpdate = Date(1_700_000_000_000L)
+
+        val ocspDer = buildOcspResponseDer(
+            cert = leafCert,
+            thisUpdate = thisUpdate,
+        )
+
+        assertEquals(
+            1_700_000_000L,
+            handler.getThisUpdateEpochSeconds(ocspDer),
+        )
     }
 
     @Test
@@ -354,6 +362,107 @@ class OcspHandlerTest {
         assertNotNull(result)
         assert(result > now.time / 1000) { "nextUpdate should be in the future" }
         assert(result < now.time / 1000 + 5 * 24 * 3600) { "nextUpdate should be 4 days from now" }
+    }
+
+    @Test
+    fun `getCrlNextUpdateEpochSeconds returns correct timestamp`() {
+        val nextUpdate = Date(1_700_000_000_000L)
+        val crlDer = buildCrlDer(nextUpdate = nextUpdate)
+
+        val result = handler.getCrlNextUpdateEpochSeconds(crlDer)
+
+        assertEquals(1_700_000_000L, result)
+    }
+
+    @Test
+    fun `getCrlNextUpdateEpochSeconds returns future timestamp for valid CRL`() {
+        val nextUpdate = Date(System.currentTimeMillis() + 7 * 86_400_000)
+        val crlDer = buildCrlDer(nextUpdate = nextUpdate)
+
+        val result = handler.getCrlNextUpdateEpochSeconds(crlDer)
+
+        assertNotNull(result)
+        assertTrue(result > System.currentTimeMillis() / 1000)
+    }
+
+    @Test
+    fun `getCrlNextUpdateEpochSeconds returns past timestamp for expired CRL`() {
+        val nextUpdate = Date(System.currentTimeMillis() - 86_400_000)
+        val crlDer = buildCrlDer(nextUpdate = nextUpdate)
+
+        val result = handler.getCrlNextUpdateEpochSeconds(crlDer)
+
+        assertNotNull(result)
+        assertTrue(result < System.currentTimeMillis() / 1000)
+    }
+
+    @Test
+    fun getThisUpdateEpochSeconds_throws_whenNoSingleResponsePresent() {
+        // A response with no addResponse(...) call at all — zero SingleResponse entries.
+        val respBuilder = BasicOCSPRespBuilder(RespID(JcaX509CertificateHolder(caCert).subject))
+        val signer = JcaContentSignerBuilder("SHA256WithECDSA").setProvider("BC").build(caKeyPair.private)
+        val basicResp = respBuilder.build(signer, arrayOf(JcaX509CertificateHolder(caCert)), Date())
+        val ocspDer = OCSPRespBuilder().build(OCSPRespBuilder.SUCCESSFUL, basicResp).encoded
+
+        assertFailsWith<IllegalStateException> {
+            handler.getThisUpdateEpochSeconds(ocspDer)
+        }
+    }
+
+    @Test
+    fun getThisUpdateEpochSeconds_throws_whenDerIsMalformed() {
+        val garbage = byteArrayOf(0x00, 0x01, 0x02, 0x03)
+
+        assertFailsWith<Exception> {
+            handler.getThisUpdateEpochSeconds(garbage)
+        }
+    }
+
+    @Test
+    fun getThisUpdateEpochSeconds_truncatesToWholeSeconds_whenSubSecondPrecisionPresent() {
+        // Date only has millisecond precision — verify the conversion floors to the second, not rounds.
+        val thisUpdate = Date(1_700_000_000_500L) // .5 seconds past the whole second
+        val ocspDer = buildOcspResponseDer(leafCert, thisUpdate = thisUpdate)
+
+        assertEquals(1_700_000_000L, handler.getThisUpdateEpochSeconds(ocspDer))
+    }
+
+    @Test
+    fun getThisUpdateEpochSeconds_returnsFirstResponse_whenMultipleResponsesPresent() {
+        val digestCalcProvider = JcaDigestCalculatorProviderBuilder().setProvider("BC").build()
+        val issuerHolder = JcaX509CertificateHolder(caCert)
+        val respBuilder = BasicOCSPRespBuilder(RespID(issuerHolder.subject))
+
+        val firstThisUpdate = Date(1_700_000_000_000L)
+        val secondThisUpdate = Date(1_800_000_000_000L)
+
+        respBuilder.addResponse(
+            CertificateID(digestCalcProvider.get(CertificateID.HASH_SHA1), issuerHolder, leafCert.serialNumber),
+            CertificateStatus.GOOD,
+            firstThisUpdate,
+            Date(firstThisUpdate.time + 86_400_000),
+            null,
+        )
+        respBuilder.addResponse(
+            CertificateID(digestCalcProvider.get(CertificateID.HASH_SHA1), issuerHolder, revokedCert.serialNumber),
+            CertificateStatus.GOOD,
+            secondThisUpdate,
+            Date(secondThisUpdate.time + 86_400_000),
+            null,
+        )
+
+        val signer = JcaContentSignerBuilder("SHA256WithECDSA").setProvider("BC").build(caKeyPair.private)
+        val basicResp = respBuilder.build(signer, arrayOf(JcaX509CertificateHolder(caCert)), Date())
+        val ocspDer = OCSPRespBuilder().build(OCSPRespBuilder.SUCCESSFUL, basicResp).encoded
+
+        assertEquals(1_700_000_000L, handler.getThisUpdateEpochSeconds(ocspDer))
+    }
+
+    @Test
+    fun getThisUpdateEpochSeconds_returnsZero_whenThisUpdateIsAtEpoch() {
+        val ocspDer = buildOcspResponseDer(leafCert, thisUpdate = Date(0L))
+
+        assertEquals(0L, handler.getThisUpdateEpochSeconds(ocspDer))
     }
 
     private companion object {

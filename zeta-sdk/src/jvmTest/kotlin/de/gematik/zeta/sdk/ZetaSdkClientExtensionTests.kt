@@ -29,6 +29,7 @@ import de.gematik.zeta.sdk.network.http.client.ZetaHttpClientBuilder
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -297,8 +298,8 @@ class ZetaSdkClientExtensionTest {
             statusResult = Result.success(SdkStatus.HAS_ACCESS_AND_REFRESH_TOKEN)
         }
         val result = ZetaSdkClientExtension.status(client)
-        assertTrue(result.isSuccess)
-        assertEquals(SdkStatus.HAS_ACCESS_AND_REFRESH_TOKEN, result.getOrNull())
+
+        assertEquals(SdkStatus.HAS_ACCESS_AND_REFRESH_TOKEN, result)
     }
 
     @Test
@@ -306,8 +307,10 @@ class ZetaSdkClientExtensionTest {
         val client = FakeZetaSdkClient().apply {
             statusResult = Result.failure(Exception("Status failed"))
         }
-        val result = ZetaSdkClientExtension.status(client)
-        assertTrue(result.isFailure)
+
+        assertFailsWith<Exception> {
+            ZetaSdkClientExtension.status(client)
+        }
     }
 
     @Test
@@ -317,7 +320,7 @@ class ZetaSdkClientExtensionTest {
                 statusResult = Result.success(expectedStatus)
             }
             val result = ZetaSdkClientExtension.status(client)
-            assertEquals(expectedStatus, result.getOrNull())
+            assertEquals(expectedStatus, result)
         }
     }
 

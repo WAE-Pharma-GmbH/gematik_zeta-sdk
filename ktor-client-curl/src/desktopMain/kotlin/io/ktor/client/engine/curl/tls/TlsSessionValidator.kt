@@ -84,7 +84,6 @@ internal fun validateTlsSession(
     config: TlsValidationConfig? = null,
     staple: ByteArray?,
 ): PendingRevocationData? = memScoped {
-
     val ssl = resolveSslPointer(easyHandle) ?: run {
         return@memScoped null
     }
@@ -149,23 +148,20 @@ private fun inspectCipher(ssl: CPointer<SSL>): String? = memScoped {
 
 @OptIn(ExperimentalForeignApi::class, UnsafeNumber::class)
 private fun inspectCertChain(ssl: CPointer<SSL>): LeafCertInfo? {
-    val certChain = SSL_get_peer_cert_chain(ssl)
-    if (certChain == null) {
-        return null
-    }
-
+    val certChain = SSL_get_peer_cert_chain(ssl) ?: return null
     val numCerts = ktor_sk_X509_num(certChain)
+    val chainMeta = mutableListOf<ChainCertMeta>()
     var leafCertInfo: LeafCertInfo? = null
 
     for (i in 0 until numCerts) {
         val cert = ktor_sk_X509_value(certChain, i) ?: continue
         val (sigAlgSn, subjectDN, notBefore, notAfter) = inspectCertMeta(cert)
         val (keyTypeName, keyBits, curveName) = inspectCertKey(cert)
+        val san = extractSan(cert)
+
+        chainMeta.add(ChainCertMeta(keyTypeName, keyBits, sigAlgSn, subjectDN, notBefore, notAfter, curveName, san))
 
         if (i == 0) {
-            val certDer = extractDer(cert)
-            val issuerDer = ktor_sk_X509_value(certChain, 1)?.let { extractDer(it) }
-
             leafCertInfo = LeafCertInfo(
                 keyTypeName = keyTypeName,
                 keyBits = keyBits,
@@ -174,13 +170,13 @@ private fun inspectCertChain(ssl: CPointer<SSL>): LeafCertInfo? {
                 notBefore = notBefore,
                 notAfter = notAfter,
                 curveName = curveName,
-                certDer = certDer,
-                issuerDer = issuerDer,
+                certDer = extractDer(cert),
+                issuerDer = ktor_sk_X509_value(certChain, 1)?.let { extractDer(it) },
                 san = extractSan(cert),
             )
         }
     }
-    return leafCertInfo
+    return leafCertInfo?.copy(fullChain = chainMeta)
 }
 
 @OptIn(ExperimentalForeignApi::class, UnsafeNumber::class)
@@ -264,6 +260,18 @@ data class LeafCertInfo(
     val certDer: ByteArray? = null,
     val issuerDer: ByteArray? = null,
     val san: List<String>? = null,
+    val fullChain: List<ChainCertMeta>? = null,
+)
+
+data class ChainCertMeta(
+    val keyTypeName: String?,
+    val keyBits: Int?,
+    val sigAlgSn: String?,
+    val subjectDN: String?,
+    val notBefore: Long?,
+    val notAfter: Long?,
+    val curveName: String?,
+    val san: List<String>?,
 )
 
 private data class CertMeta(

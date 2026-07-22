@@ -25,6 +25,8 @@
 using ZetaSdk;
 using ZetaSdk.Config;
 
+var failed = false;
+
 bool disableTls = string.Equals(
     Environment.GetEnvironmentVariable("DISABLE_SERVER_VALIDATION"), "true",
     StringComparison.OrdinalIgnoreCase);
@@ -65,7 +67,10 @@ var config = new ZetaClientConfig
      {
          Console.WriteLine($"[{level}] [{tag ?? "Zeta"}] {message}");
      },
-     LogLevel = ZetaLogLevel.Info,
+     LogLevel = Enum.TryParse<ZetaLogLevel>(
+         Environment.GetEnvironmentVariable("LOG_LEVEL"),
+         ignoreCase: true,
+         out var logLevel) ? logLevel : ZetaLogLevel.Info,
      Security = new SecurityConfig
       {
           /*AdditionalCaPem = [
@@ -100,7 +105,8 @@ try
 }
 catch (ZetaSdkException ex)
 {
-    Console.WriteLine($"Error while building SDK: {ex.Message}");
+    Console.Error.WriteLine($"Error while building SDK: {ex.Message}");
+    Environment.Exit(1);
     return;
 }
 
@@ -111,86 +117,92 @@ using var http = client.CreateHttpClientAsync();
 var headers = new Dictionary<string, string> { ["PoPP"] = poppToken };
 
 // GET
-var getResp = await http.GetAsync("hellozeta", headers);
-Console.WriteLine($"[GET] - {getResp}");
+try { Console.WriteLine($"[GET] - {await http.GetAsync("hellozeta", headers)}"); }
+catch (Exception ex) { Console.Error.WriteLine($"[FAIL] GET: {ex.Message}"); failed = true; }
 
 // POST
-const string createJson =
-  """{"prescriptionId":"RX-2025-000099","patientId":"PAT-123456","practitionerId":"PRAC-98765","medicationName":"Ibuprofen 400 mg","dosage":"1","issuedAt":"2025-09-22T10:30:00Z","expiresAt":"2025-12-31T23:59:59Z","status":"CREATED"}""";
-
-var postResp = await http.PostAsync("api/erezept", createJson, headers);
-Console.WriteLine($"[POST] - {postResp}");
-
-var idMatch = System.Text.RegularExpressions.Regex.Match(postResp.Body, @"""id""\s*:\s*(\d+)");
-if (!idMatch.Success)
+try
 {
-    Console.WriteLine("Could not extract id from POST response — skipping PUT/DELETE");
+    const string createJson =
+      """{"prescriptionId":"RX-2025-000099","patientId":"PAT-123456","practitionerId":"PRAC-98765","medicationName":"Ibuprofen 400 mg","dosage":"1","issuedAt":"2025-09-22T10:30:00Z","expiresAt":"2025-12-31T23:59:59Z","status":"CREATED"}""";
+
+    var postResp = await http.PostAsync("api/erezept", createJson, headers);
+    Console.WriteLine($"[POST] - {postResp}");
+
+    var idMatch = System.Text.RegularExpressions.Regex.Match(postResp.Body, @"""id""\s*:\s*(\d+)");
+    if (!idMatch.Success)
+    {
+        Console.WriteLine("Could not extract id from POST response — skipping PUT/DELETE");
+    }
+    else
+    {
+        var id  = idMatch.Groups[1].Value;
+        var url = $"api/erezept/{id}";
+        Console.WriteLine($"Using id={id} for subsequent calls");
+
+        // PUT
+        const string updateJson =
+            """{"prescriptionId":"RX-2025-000099","patientId":"PAT-123456","practitionerId":"PRAC-98765","medicationName":"Ibuprofen 400 mg","dosage":"2","issuedAt":"2025-09-22T10:30:00Z","expiresAt":"2025-12-31T23:59:59Z","status":"UPDATED"}""";
+
+          Console.WriteLine($"[PUT] - {await http.PutAsync(url, updateJson, headers)}");
+
+          // DELETE
+          Console.WriteLine($"[DELETE] - {await http.DeleteAsync(url, headers)}");
+    }
 }
-else
-{
-    var id  = idMatch.Groups[1].Value;
-    var url = $"api/erezept/{id}";
-    Console.WriteLine($"Using id={id} for subsequent calls");
-
-    // PUT
-    const string updateJson =
-        """{"prescriptionId":"RX-2025-000099","patientId":"PAT-123456","practitionerId":"PRAC-98765","medicationName":"Ibuprofen 400 mg","dosage":"2","issuedAt":"2025-09-22T10:30:00Z","expiresAt":"2025-12-31T23:59:59Z","status":"UPDATED"}""";
-
-    var putResp = await http.PutAsync(url, updateJson, headers);
-    Console.WriteLine($"[PUT] - {putResp}");
-
-    // DELETE
-    var deleteResp = await http.DeleteAsync(url, headers);
-    Console.WriteLine($"[DELETE] - {deleteResp}");
-}
+catch (Exception ex) { Console.Error.WriteLine($"[FAIL] POST/PUT/DELETE: {ex.Message}"); failed = true; }
 
 // OPTIONS
-var optionsResp = await http.OptionsAsync("api/erezept", headers);
-Console.WriteLine($"[OPTIONS] - {optionsResp}");
+try { Console.WriteLine($"[OPTIONS] - {await http.OptionsAsync("api/erezept", headers)}"); }
+catch (Exception ex) { Console.Error.WriteLine($"[FAIL] OPTIONS: {ex.Message}"); failed = true; }
 
 // HEAD
-var headResp = await http.HeadAsync("api/erezept", headers);
-Console.WriteLine($"[HEAD] - {headResp}");
+try { Console.WriteLine($"[HEAD] - {await http.HeadAsync("api/erezept", headers)}"); }
+catch (Exception ex) { Console.Error.WriteLine($"[FAIL] HEAD: {ex.Message}"); failed = true; }
 
 // WebSockets sample
 Console.WriteLine("\nWebSocket");
 
-string wsHost = new Uri(wsBaseUrl).Host;
-
-client.OpenWebSocket(wsBaseUrl, headers, session =>
+try
 {
-    var connected = session.StompConnect(wsHost);
-    Console.WriteLine($"CONNECTED: {connected.Trim()}");
+    string wsHost = new Uri(wsBaseUrl).Host;
+    var result = client.OpenWebSocket(wsBaseUrl, headers, session =>
+    {
+        var connected = session.StompConnect(wsHost);
+        Console.WriteLine($"CONNECTED: {connected.Trim()}");
 
-    session.StompSubscribe("sub-1", wsContextPath, "/topic/erezept");
-    session.StompSubscribe("sub-2", wsContextPath, "/user/queue/erezept");
+        session.StompSubscribe("sub-1", wsContextPath, "/topic/erezept");
+        session.StompSubscribe("sub-2", wsContextPath, "/user/queue/erezept");
 
-    const string createBody =
-        """
-        {
-        "prescriptionId": "RX-2025-100123",
-        "patientId": "PAT-123456",
-        "practitionerId": "PRAC-98765",
-        "medicationName": "Ibuprofen 400 mg",
-        "dosage": "1",
-        "issuedAt": "2025-09-22T10:30:00Z",
-        "expiresAt": "2025-12-31T23:59:59Z",
-        "status": "CREATED"
-        }
-        """;
+        const string createBody =
+            """
+            {
+            "prescriptionId": "RX-2025-100123",
+            "patientId": "PAT-123456",
+            "practitionerId": "PRAC-98765",
+            "medicationName": "Ibuprofen 400 mg",
+            "dosage": "1",
+            "issuedAt": "2025-09-22T10:30:00Z",
+            "expiresAt": "2025-12-31T23:59:59Z",
+            "status": "CREATED"
+            }
+            """;
 
-    session.StompSend(wsContextPath, "/app/erezept.create", createBody);
-    session.StompSend(wsContextPath, "/app/erezept.read.1", "{}");
+        session.StompSend(wsContextPath, "/app/erezept.create", createBody);
+        session.StompSend(wsContextPath, "/app/erezept.read.1", "{}");
 
-    var messages = session.ReceiveMessages(count: 2);
-    foreach (var msg in messages)
-        Console.WriteLine($"Received: {msg}");
+        var messages = session.ReceiveMessages(count: 2);
+        foreach (var msg in messages)
+            Console.WriteLine($"Received: {msg}");
 
-    session.Close();
-});
+        session.Close();
+    });
+    if (result != 0) { Console.Error.WriteLine("[FAIL] WebSocket failed - check logs for details"); failed = true; }
+}
+catch (Exception ex) { Console.Error.WriteLine($"[FAIL] WebSocket: {ex.Message}"); failed = true; }
 
-Console.WriteLine("Done");
-
+Console.WriteLine(failed ? "\n[FAILED]" : "\n[SUCCESS]");
+Environment.Exit(failed ? 1 : 0);
 
 static string Env(string key, string fallback = "")
     => Environment.GetEnvironmentVariable(key) ?? fallback;

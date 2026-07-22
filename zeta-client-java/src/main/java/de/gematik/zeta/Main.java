@@ -165,6 +165,9 @@ public class Main {
                 null
             ));
 
+        var status = ZetaSdkClientExtension.status(sdkClient);
+        Log.INSTANCE.i(null, "SDK-STATUS", () -> "Current SDK Status: " + status);
+
         ZetaHttpClient httpClient = null;
         try {
             // Forget any previous instance keys before the demo provisions fresh credentials.

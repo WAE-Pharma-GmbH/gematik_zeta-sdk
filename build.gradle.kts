@@ -47,6 +47,7 @@ sonar {
                 "**/desktopMain/**",
                 "**/linuxMain/**",
                 "**/mingwMain/**",
+                "**/mingwX64Main/**",
                 "**/macosMain/**",
                 "**/androidMain/**",
                 "**/iosMain/**",

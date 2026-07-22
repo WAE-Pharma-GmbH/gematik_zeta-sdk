@@ -55,6 +55,11 @@ public fun X509Certificate.toZetaCertInfo(): ZetaCertInfo {
         }
     }
 
+    val sanDnsNames = subjectAlternativeNames
+        ?.filter { (it[0] as? Int) == 2 }
+        ?.mapNotNull { it[1] as? String }
+        ?: emptyList()
+
     return ZetaCertInfo(
         subjectDN = subjectX500Principal.name,
         sigAlgName = sigAlgName,
@@ -63,5 +68,6 @@ public fun X509Certificate.toZetaCertInfo(): ZetaCertInfo {
         curveName = curveName,
         notBefore = notBefore.time / 1000,
         notAfter = notAfter.time / 1000,
+        san = sanDnsNames,
     )
 }

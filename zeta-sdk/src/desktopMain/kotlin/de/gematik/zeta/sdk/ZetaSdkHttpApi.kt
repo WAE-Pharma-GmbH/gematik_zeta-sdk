@@ -83,6 +83,7 @@ private fun HttpResponseWrapper.toNative(): CPointer<ZetaSdk_HttpResponse> {
         status = this@toNative.status
         body = strdup(this@toNative.body)!!
         headers = resultHeaders
+        headersCount = this@toNative.headers.size
         error = null
     }.ptr
 }
@@ -90,7 +91,10 @@ private fun HttpResponseWrapper.toNative(): CPointer<ZetaSdk_HttpResponse> {
 private fun Throwable.toNativeError(): CPointer<ZetaSdk_HttpResponse> {
     printStackTrace()
     return nativeHeap.alloc<ZetaSdk_HttpResponse>().apply {
+        status = 0
         body = null
+        headers = null
+        headersCount = 0
         error = strdup(message)!!
     }.ptr
 }

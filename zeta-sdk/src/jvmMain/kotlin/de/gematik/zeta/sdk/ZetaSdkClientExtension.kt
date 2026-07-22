@@ -58,9 +58,9 @@ object ZetaSdkClientExtension {
     }
 
     @JvmStatic
-    fun status(client: ZetaSdkClient): Result<SdkStatus> {
+    fun status(client: ZetaSdkClient): SdkStatus {
         return runBlocking {
-            client.status()
+            client.status().getOrThrow()
         }
     }
 

@@ -24,13 +24,17 @@
 
 package de.gematik.zeta.sdk.crypto
 
-actual class OcspHandlerImpl actual constructor() : OcspHandler {
+actual class RevocationHandlerImpl actual constructor() : RevocationHandler {
     private val notImplementedError = "Not yet implemented"
-    actual override fun getProducedAtEpochSeconds(ocspResponseDer: ByteArray): Long {
+    actual override fun getThisUpdateEpochSeconds(ocspResponseDer: ByteArray): Long {
         TODO(notImplementedError)
     }
 
-    actual fun validate(
+    actual override fun getNextUpdateEpochSeconds(ocspResponseDer: ByteArray, certDer: ByteArray, issuerDer: ByteArray): Long? {
+        TODO("Not yet implemented")
+    }
+
+    actual override fun validate(
         ocspResponseDer: ByteArray,
         certDer: ByteArray,
         issuerDer: ByteArray,
@@ -48,5 +52,9 @@ actual class OcspHandlerImpl actual constructor() : OcspHandler {
 
     actual override fun validateCrl(crlDer: ByteArray, certDer: ByteArray, issuerDer: ByteArray) {
         TODO(notImplementedError)
+    }
+
+    actual override fun getCrlNextUpdateEpochSeconds(crlDer: ByteArray): Long? {
+        TODO("Not yet implemented")
     }
 }
