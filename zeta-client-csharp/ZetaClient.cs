@@ -153,18 +153,6 @@ public sealed class ZetaClient : IDisposable
         GC.KeepAlive(nativeDelegate);
 
         return GetLastError() == null ? 0 : -1;
-<<<<<<< HEAD
-=======
-    }
-
-    public static string? GetLastError()
-    {
-        var ptr = ZetaSdkNative.ZetaSdk_getLastError();
-        if (ptr == IntPtr.Zero) return null;
-        var message = Marshal.PtrToStringUTF8(ptr);
-        ZetaSdkNative.ZetaSdk_freeLastError(ptr);
-        return message;
->>>>>>> upstream/main
     }
 
     public static string? GetLastError()
