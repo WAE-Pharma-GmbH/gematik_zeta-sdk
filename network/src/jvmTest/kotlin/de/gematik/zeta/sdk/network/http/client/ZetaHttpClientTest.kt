@@ -24,9 +24,13 @@
 
 package de.gematik.zeta.sdk.network.http.client
 
+import de.gematik.zeta.sdk.crypto.RevocationHandler
 import de.gematik.zeta.sdk.network.http.client.config.ClientConfig
 import de.gematik.zeta.sdk.network.http.client.config.ProxyConfig
 import de.gematik.zeta.sdk.network.http.client.config.ProxyType
+import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
+import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpRequestTimeoutException
@@ -47,6 +51,8 @@ import io.ktor.http.Url
 import io.ktor.http.contentType
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import kotlinx.io.IOException
@@ -62,11 +68,16 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Unit tests for [zetaHttpClient].
  */
 class ZetaHttpClientJvmTest {
+    private val noDependencies = HttpClientDependencies(
+        revocationChecker = null,
+    )
     private fun startTlsServerWithCustomRoot(
         host: String = "localhost",
         addIpSan: Boolean = true,
@@ -122,7 +133,7 @@ class ZetaHttpClientJvmTest {
 
     @Test
     fun testTimeoutsShortRequestTimesOut() = runTest {
-        val engine = MockEngine { delay(150); respond("ok", HttpStatusCode.OK) }
+        val engine = MockEngine { delay(150.milliseconds); respond("ok", HttpStatusCode.OK) }
         val client = ZetaHttpClientBuilder().timeouts(requestMs = 50).build(engine)
 
         assertFailsWith<HttpRequestTimeoutException> { client.get("/") }
@@ -130,7 +141,7 @@ class ZetaHttpClientJvmTest {
 
     @Test
     fun testTimeoutsLongerRequestDoesNotTimeout() = runTest {
-        val engine = MockEngine { delay(50); respond("ok", HttpStatusCode.OK) }
+        val engine = MockEngine { delay(50.milliseconds); respond("ok", HttpStatusCode.OK) }
         val client = ZetaHttpClientBuilder().timeouts(requestMs = 150).build(engine)
         val res = client.get("/slow-ok")
 
@@ -236,7 +247,7 @@ class ZetaHttpClientJvmTest {
         val engine = MockEngine { error("error") }
 
         assertFailsWith<Throwable> {
-            zetaHttpClient({ ZetaHttpClientBuilder().build(engine) }).get("/")
+            zetaHttpClient({ ZetaHttpClientBuilder().build(engine) }, noDependencies).get("/")
         }
     }
 
@@ -431,7 +442,7 @@ class ZetaHttpClientJvmTest {
             assertEquals(HttpMethod.Delete, request.method)
             respond(content = ByteReadChannel(""), status = HttpStatusCode.NoContent)
         }
-        val client = ZetaHttpClient(io.ktor.client.HttpClient(mockEngine))
+        val client = ZetaHttpClient(HttpClient(mockEngine))
         val response = client.delete("/test")
 
         assertEquals(204, response.status.value)
@@ -443,7 +454,7 @@ class ZetaHttpClientJvmTest {
             assertEquals(HttpMethod.Delete, request.method)
             respond(content = ByteReadChannel(""), status = HttpStatusCode.OK)
         }
-        val client = ZetaHttpClient(io.ktor.client.HttpClient(mockEngine))
+        val client = ZetaHttpClient(HttpClient(mockEngine))
         val response = client.delete(Url("https://example.com/test"))
 
         assertNotNull(response)
@@ -455,7 +466,7 @@ class ZetaHttpClientJvmTest {
             assertEquals(HttpMethod.Get, request.method)
             respond(content = ByteReadChannel(""), status = HttpStatusCode.OK)
         }
-        val client = ZetaHttpClient(io.ktor.client.HttpClient(mockEngine))
+        val client = ZetaHttpClient(HttpClient(mockEngine))
         val response = client.request { method = HttpMethod.Get; url("/test") }
 
         assertNotNull(response)
@@ -467,7 +478,7 @@ class ZetaHttpClientJvmTest {
             assertEquals("/test", request.url.encodedPath)
             respond(content = ByteReadChannel(""), status = HttpStatusCode.OK)
         }
-        val client = ZetaHttpClient(io.ktor.client.HttpClient(mockEngine))
+        val client = ZetaHttpClient(HttpClient(mockEngine))
         val response = client.request("/test") { method = HttpMethod.Get }
 
         assertNotNull(response)
@@ -476,7 +487,7 @@ class ZetaHttpClientJvmTest {
     @Test
     fun request_performsRequest_urlObject() = runTest {
         val mockEngine = MockEngine { respond(content = ByteReadChannel(""), status = HttpStatusCode.OK) }
-        val client = ZetaHttpClient(io.ktor.client.HttpClient(mockEngine))
+        val client = ZetaHttpClient(HttpClient(mockEngine))
         val response = client.request(Url("https://example.com/test")) { method = HttpMethod.Get }
 
         assertNotNull(response)
@@ -489,7 +500,7 @@ class ZetaHttpClientJvmTest {
             isFormData = request.body is FormDataContent
             respond(content = ByteReadChannel(""), status = HttpStatusCode.OK)
         }
-        val client = ZetaHttpClient(io.ktor.client.HttpClient(mockEngine))
+        val client = ZetaHttpClient(HttpClient(mockEngine))
         val params = Parameters.build { append("key", "value") }
         val response = client.submitForm("/test", params)
 
@@ -504,7 +515,7 @@ class ZetaHttpClientJvmTest {
             queryFound = request.url.parameters.contains("key")
             respond(content = ByteReadChannel(""), status = HttpStatusCode.OK)
         }
-        val client = ZetaHttpClient(io.ktor.client.HttpClient(mockEngine))
+        val client = ZetaHttpClient(HttpClient(mockEngine))
         val params = Parameters.build { append("key", "value") }
         client.submitForm("/test", params, encodeInQuery = true)
 
@@ -518,7 +529,7 @@ class ZetaHttpClientJvmTest {
             headerFound = request.headers.contains("X-Custom", "value")
             respond(content = ByteReadChannel(""), status = HttpStatusCode.OK)
         }
-        val client = ZetaHttpClient(io.ktor.client.HttpClient(mockEngine))
+        val client = ZetaHttpClient(HttpClient(mockEngine))
         val params = Parameters.build { append("key", "value") }
         client.submitForm("/test", params) { headers.append("X-Custom", "value") }
 
@@ -528,14 +539,14 @@ class ZetaHttpClientJvmTest {
     @Test
     fun close_closesUnderlyingClient_doesNotThrow() {
         val mockEngine = MockEngine { respond(ByteReadChannel(""), HttpStatusCode.OK) }
-        val client = ZetaHttpClient(io.ktor.client.HttpClient(mockEngine))
+        val client = ZetaHttpClient(HttpClient(mockEngine))
         client.close()
     }
 
     @Test
     fun useRaw_providesAccessToDelegate_returnsValue() {
         val mockEngine = MockEngine { respond(ByteReadChannel(""), HttpStatusCode.OK) }
-        val client = ZetaHttpClient(io.ktor.client.HttpClient(mockEngine))
+        val client = ZetaHttpClient(HttpClient(mockEngine))
         val result = client.useRaw { "test value" }
 
         assertEquals("test value", result)
@@ -550,7 +561,7 @@ class ZetaHttpClientJvmTest {
                 headers = headersOf("Content-Type" to listOf("text/plain")),
             )
         }
-        val client = ZetaHttpClient(io.ktor.client.HttpClient(mockEngine))
+        val client = ZetaHttpClient(HttpClient(mockEngine))
         val response = client.get("/test")
 
         assertEquals(HttpStatusCode.OK, response.status)
@@ -569,7 +580,7 @@ class ZetaHttpClientJvmTest {
                 ),
             )
         }
-        val client = ZetaHttpClient(io.ktor.client.HttpClient(mockEngine))
+        val client = ZetaHttpClient(HttpClient(mockEngine))
         val response = client.post("/test")
 
         assertEquals("custom-value", response.headers["X-Custom-Header"])
@@ -578,7 +589,7 @@ class ZetaHttpClientJvmTest {
 
     @Test
     fun zetaHttpClient_installsContentNegotiation_always() {
-        val client = zetaHttpClient(configure = { contentNegotiation = true })
+        val client = zetaHttpClient(configure = { contentNegotiation = true }, dependencies = noDependencies)
         val hasPlugin = client.useRaw { pluginOrNull(ContentNegotiation) != null }
 
         assertTrue(hasPlugin)
@@ -588,7 +599,7 @@ class ZetaHttpClientJvmTest {
     @Test
     fun zetaHttpClient_appliesExtras_whenProvided() {
         var extrasApplied = false
-        val client = zetaHttpClient(configure = {}, addExtras = { extrasApplied = true })
+        val client = zetaHttpClient(configure = {}, addExtras = { extrasApplied = true }, dependencies = noDependencies)
 
         assertTrue(extrasApplied)
         client.close()
@@ -597,7 +608,7 @@ class ZetaHttpClientJvmTest {
     @Test
     fun zetaHttpClient_usesInjectedEngine_whenProvided() {
         val mockEngine = MockEngine { respond(ByteReadChannel(""), HttpStatusCode.OK) }
-        val client = zetaHttpClient(configure = { engineFactory = { mockEngine } })
+        val client = zetaHttpClient(configure = { engineFactory = { mockEngine } }, noDependencies)
 
         assertNotNull(client)
         client.close()
@@ -638,7 +649,7 @@ class ZetaHttpClientJvmTest {
         }
 
         // Act
-        val client = buildPlatformClient(cfg) {}
+        val client = buildPlatformClient(cfg, noDependencies) {}
 
         // Assert
         assertEquals("user", System.getProperty("java.net.socks.username"))
@@ -654,7 +665,7 @@ class ZetaHttpClientJvmTest {
         }
 
         // Act
-        val client = buildPlatformClient(cfg) {}
+        val client = buildPlatformClient(cfg, noDependencies) {}
 
         // Assert
         assertEquals("ssl:handshake", System.getProperty("javax.net.debug"))
@@ -670,7 +681,7 @@ class ZetaHttpClientJvmTest {
         }
 
         // Act
-        val client = buildPlatformClient(cfg) {}
+        val client = buildPlatformClient(cfg, noDependencies) {}
 
         // Assert
         assertNull(System.getProperty("javax.net.debug"))
@@ -682,9 +693,20 @@ class ZetaHttpClientJvmTest {
         // Arrange
         val (server, root) = startTlsServerWithCustomRoot()
         try {
+            val handler = mockk<RevocationHandler>()
+            every { handler.getNextUpdateEpochSeconds(any(), any(), any()) } returns Clock.System.now().epochSeconds + 3600
+            every { handler.validate(any(), any(), any()) } throws IllegalStateException("Certificate is revoked")
+
+            val revocationChecker = RevocationChecker(
+                storage = RevocationStorage(InMemoryStorage(), ResourceScope("https://localhost", emptyList())),
+                httpClient = HttpClient(MockEngine { error("unexpected network call: ${it.url}") }),
+                handler = handler,
+            )
+
             val client = ZetaHttpClientBuilder()
                 .disableServerValidation(false)
                 .addCaPem(root.certificatePem())
+                .revocationChecker(revocationChecker)
                 .build()
 
             // Act & Assert
@@ -718,7 +740,7 @@ class ZetaHttpClientJvmTest {
         }
 
         // Act
-        val client = buildHttpClient(cfg) {}
+        val client = buildHttpClient(cfg, noDependencies) {}
         client.get("http://example.com/test")
         client.close()
 
@@ -734,7 +756,7 @@ class ZetaHttpClientJvmTest {
         val cfg = ClientConfig().apply {
             network = network.copy(proxyConfig = null)
         }
-        val client = buildPlatformClient(cfg) {}
+        val client = buildPlatformClient(cfg, noDependencies) {}
         assertNotNull(client)
         client.close()
     }
@@ -758,7 +780,7 @@ class ZetaHttpClientJvmTest {
             )
         }
 
-        val client = buildPlatformClient(cfg) {}
+        val client = buildPlatformClient(cfg, noDependencies) {}
 
         runCatching {
             client.get("https://example.com/test")
@@ -796,7 +818,7 @@ class ZetaHttpClientJvmTest {
             )
         }
 
-        val client = buildPlatformClient(cfg) {}
+        val client = buildPlatformClient(cfg, noDependencies) {}
 
         runCatching {
             client.get("https://example.com/test")
@@ -826,7 +848,7 @@ class ZetaHttpClientJvmTest {
             )
         }
 
-        val client = buildPlatformClient(cfg) {}
+        val client = buildPlatformClient(cfg, noDependencies) {}
         assertNotNull(client)
         client.close()
 

@@ -24,7 +24,12 @@
 
 package de.gematik.zeta.sdk.asl.vau
 
+import de.gematik.zeta.sdk.asl.AslCertDataApi
+import de.gematik.zeta.sdk.asl.AslStorage
+import de.gematik.zeta.sdk.asl.AslStorageImpl
+import de.gematik.zeta.sdk.asl.CertData
 import de.gematik.zeta.sdk.asl.EncapsulationResult
+import de.gematik.zeta.sdk.asl.EstablishedSession
 import de.gematik.zeta.sdk.asl.M3InnerLayer
 import de.gematik.zeta.sdk.asl.Message2
 import de.gematik.zeta.sdk.asl.SignedVauPublicKeys
@@ -32,8 +37,12 @@ import de.gematik.zeta.sdk.asl.VauKeys
 import de.gematik.zeta.sdk.crypto.AesGcmCipherImpl
 import de.gematik.zeta.sdk.crypto.EcPointP256
 import de.gematik.zeta.sdk.crypto.hashWithSha256
+import de.gematik.zeta.sdk.network.http.client.RevocationChecker
+import de.gematik.zeta.sdk.network.http.client.RevocationStorage
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
 import de.gematik.zeta.sdk.network.http.client.config.tls.sanMatchesHost
+import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.request.HttpRequestBuilder
@@ -634,7 +643,10 @@ class Message2And3Test {
         assertEquals("ML-KEM-768 key must be 1184 bytes, got 1183", error.message)
     }
 
-    private fun defaultValidationBundle(): CertValidationBundle {
+    private fun defaultValidationBundle(
+        certDataCache: AslStorage = AslStorageImpl(InMemoryStorage(), ResourceScope("", emptyList())),
+        certDataFetcher: AslCertDataApi = { _, _ -> error("not reached in this test") },
+    ): CertValidationBundle {
         val zetaClient =
             ZetaHttpClient(
                 HttpClient(
@@ -645,11 +657,14 @@ class Message2And3Test {
             )
 
         val context = HttpContext(zetaClient, HttpRequestBuilder())
-
+        val storage =
+            RevocationChecker(RevocationStorage(InMemoryStorage(), ResourceScope("", listOf())), HttpClient {})
         return CertValidationBundle(
             http = context,
-            certDataFetcher = { _, _ -> error("not reached in this test") },
+            certDataFetcher = certDataFetcher,
             tiTrustAnchors = emptyList(),
+            certDataCache = certDataCache,
+            revocationChecker = storage,
         )
     }
 
@@ -831,6 +846,93 @@ class Message2And3Test {
     fun sanMatchesHost_returnsFalse_whenHostIsJustTheSuffix() {
         assertFalse(sanMatchesHost("*.example.com", ".example.com"))
     }
+
+    @Test
+    fun validateSignedVauPublicKeys_usesCachedCertData_whenAvailable() = runTest {
+        // Arrange
+        val cache = FakeCertDataCache(
+            cached = buildCertData(),
+        )
+
+        val validation = defaultValidationBundle(
+            certDataCache = cache,
+            certDataFetcher = { _, _ -> error("Fetcher should not be called when cache hit") },
+        )
+
+        val signed = buildSigned()
+
+        // Act
+        assertFailsWith<Exception> {
+            validateSignedVauPublicKeys(
+                signed = signed,
+                validation = validation,
+                clock = FixedClock(1000),
+                requiredRoleOid = requiredOid,
+            )
+        }
+
+        // Assert
+        assertEquals(1, cache.getCalls)
+        assertEquals(0, cache.putCalls)
+    }
+
+    @Test
+    fun validateSignedVauPublicKeys_fetchesAndStoresCertData_whenCacheMiss() = runTest {
+        // Arrange
+        val fetched = buildCertData()
+        val cache = FakeCertDataCache()
+
+        val validation = defaultValidationBundle(
+            certDataCache = cache,
+            certDataFetcher = { _, _ -> fetched },
+        )
+
+        val signed = buildSigned()
+
+        // Act
+        assertFailsWith<Exception> {
+            validateSignedVauPublicKeys(
+                signed = signed,
+                validation = validation,
+                clock = FixedClock(1000),
+                requiredRoleOid = requiredOid,
+            )
+        }
+
+        // Assert
+        assertEquals(1, cache.getCalls)
+        assertEquals(1, cache.putCalls)
+        assertEquals(fetched.cert.toList(), cache.stored!!.cert.toList())
+        assertEquals(fetched.ca.toList(), cache.stored!!.ca.toList())
+        assertEquals(fetched.rcaChain.map { it.toList() }, cache.stored!!.rcaChain.map { it.toList() })
+    }
+
+    @Test
+    fun validateSignedVauPublicKeys_usesCertificateHashAndVersionForCacheLookup() = runTest {
+        // Arrange
+        val cache = FakeCertDataCache(cached = buildCertData())
+
+        val validation = defaultValidationBundle(
+            certDataCache = cache,
+            certDataFetcher = { _, _ -> error("Fetcher should not be called") },
+        )
+
+        val signed = buildSigned()
+
+        // Act
+        assertFailsWith<Exception> {
+            validateSignedVauPublicKeys(
+                signed = signed,
+                validation = validation,
+                clock = FixedClock(1000),
+                requiredRoleOid = requiredOid,
+            )
+        }
+
+        // Assert
+        assertEquals(signed.certificateHash.toHexString(), cache.lastHash)
+        assertEquals(signed.certificateDescriptionVersion, cache.lastVersion)
+    }
 }
 
 private fun defaultVauKeys(
@@ -845,6 +947,55 @@ private fun defaultVauKeys(
         issuedAt = 0,
         comment = "",
     )
+}
+
+private fun buildCertData(): CertData =
+    CertData(
+        cert = byteArrayOf(1, 2, 3),
+        ca = byteArrayOf(4, 5, 6),
+        rcaChain = listOf(byteArrayOf(7, 8, 9)),
+    )
+
+private class FakeCertDataCache(
+    private val cached: CertData? = null,
+) : AslStorage {
+    var getCalls = 0
+    var putCalls = 0
+    var lastHash: String? = null
+    var lastVersion: Int? = null
+    var stored: CertData? = null
+    override suspend fun saveSession(session: EstablishedSession) {
+        TODO("Not yet implemented")
+    }
+
+    override suspend fun getCurrentSession(): EstablishedSession? {
+        TODO("Not yet implemented")
+    }
+
+    override suspend fun getCachedCertData(
+        certificateHashHex: String,
+        certificateDescriptionVersion: Int,
+    ): CertData? {
+        getCalls++
+        lastHash = certificateHashHex
+        lastVersion = certificateDescriptionVersion
+        return cached
+    }
+
+    override suspend fun saveCachedCertData(
+        certificateHashHex: String,
+        certificateDescriptionVersion: Int,
+        certData: CertData,
+    ) {
+        putCalls++
+        lastHash = certificateHashHex
+        lastVersion = certificateDescriptionVersion
+        stored = certData
+    }
+
+    override suspend fun clear() {
+        TODO("Not yet implemented")
+    }
 }
 
 private fun defaultEcPublicKey(

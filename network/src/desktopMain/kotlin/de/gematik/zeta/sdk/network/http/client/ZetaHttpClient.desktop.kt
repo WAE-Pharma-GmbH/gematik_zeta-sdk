@@ -38,13 +38,13 @@ import de.gematik.zeta.sdk.network.http.client.config.tls.ZetaTlsValidator
 import io.ktor.client.HttpClient
 import io.ktor.client.HttpClientConfig
 import io.ktor.client.engine.ProxyBuilder
-import io.ktor.client.engine.cio.CIO
 import io.ktor.client.engine.curl.Curl
 import io.ktor.client.engine.curl.CurlClientEngineConfig
 import io.ktor.client.engine.curl.SslVersion
 import io.ktor.client.engine.curl.internal.PendingRevocationData
 import io.ktor.client.engine.curl.internal.globalRevocationFn
 import io.ktor.client.engine.curl.internal.zetaRevocationFn
+import io.ktor.client.engine.curl.tls.ChainCertMeta
 import io.ktor.client.engine.curl.tls.LeafCertInfo
 import io.ktor.client.engine.curl.tls.TlsSessionData
 import io.ktor.client.engine.curl.tls.TlsValidationConfig
@@ -74,22 +74,18 @@ private fun validateRevocationBlocking(
     staple: ByteArray?,
     certDer: ByteArray,
     issuerDer: ByteArray,
+    revocationChecker: RevocationChecker?,
 ): Boolean = runCatching {
     Log.d { "[ZETA-TLS] validateRevocationBlocking: staple=${staple?.size} certDer=${certDer.size} issuerDer=${issuerDer.size}" }
-    val client = HttpClient(CIO) {
-        engine { requestTimeout = 10_000 }
-    }
-    try {
-        runBlocking {
-            validateRevocation(
-                stapledOcspResponse = staple,
-                certDer = certDer,
-                issuerDer = issuerDer,
-                httpClient = client,
-            )
+    runBlocking {
+        val checker = requireNotNull(revocationChecker) {
+            "RevocationChecker is required when TLS validation is enabled"
         }
-    } finally {
-        client.close()
+        checker.validate(
+            stapledOcspResponse = staple,
+            certDer = certDer,
+            issuerDer = issuerDer,
+        )
     }
 }.onFailure {
     Log.e { "[ZETA-TLS] validateRevocationBlocking FAILED: ${it.message}" }
@@ -97,11 +93,14 @@ private fun validateRevocationBlocking(
 
 internal actual fun buildPlatformClient(
     cfg: ClientConfig,
+    dependencies: HttpClientDependencies,
     commonSetup: HttpClientConfig<*>.() -> Unit,
 ): HttpClient {
     Log.d { "[ZETA-TLS] buildPlatformClient: registering revocation callback" }
 
-    initZetaRevocationCallback(::validateRevocationBlocking)
+    initZetaRevocationCallback { staple, certDer, issuerDer ->
+        validateRevocationBlocking(staple, certDer, issuerDer, dependencies.revocationChecker)
+    }
 
     Log.d { "[ZETA-TLS] buildPlatformClient: building curl client" }
 
@@ -122,9 +121,17 @@ private fun CurlClientEngineConfig.applyTlsConfig(security: SecurityConfig) {
     sslVerifyStatus = false
     security.additionalCaFile?.let { caInfo = it }
 
-    val pemBlob = security.additionalCaPem
+    val explicitPemBlob = security.additionalCaPem
         .filter { it.isNotBlank() }
-        .takeIf { it.isNotEmpty() }?.joinToString("\n")?.toByteArray(Charsets.UTF_8)
+        .takeIf { it.isNotEmpty() }
+        ?.joinToString("\n")
+        ?.toByteArray(Charsets.UTF_8)
+
+    val pemBlob = when {
+        explicitPemBlob != null -> explicitPemBlob
+        security.additionalCaFile != null -> null
+        else -> platformDefaultCaBundlePem()
+    }
 
     if (pemBlob != null) {
         Log.d { "[ZETA-TLS] applyTlsConfig: caPemBlob ${pemBlob.size} bytes" }
@@ -164,11 +171,13 @@ internal fun validateSession(sessionData: TlsSessionData): PendingRevocationData
     )
     Log.d { "[ZETA-TLS] tlsResult: compliant=${tlsResult.isCompliant} errors=${tlsResult.errors} warnings=${tlsResult.warnings}" }
 
-    val certResult = ZetaCertificateValidator.validate(
-        leafCertInfo.toZetaCertInfo(),
-        Clock.System.now().epochSeconds,
-        sessionData.host,
-    )
+    val certResult = leafCertInfo.fullChain?.let { chain ->
+        ZetaCertificateValidator.validateChain(
+            chain.map { it.toZetaCertInfo() },
+            Clock.System.now().epochSeconds,
+            sessionData.host,
+        )
+    } ?: ZetaCertificateValidator.validate(leafCertInfo.toZetaCertInfo(), Clock.System.now().epochSeconds, sessionData.host)
 
     Log.d { "[ZETA-TLS] certResult: valid=${certResult.isValid} errors=${certResult.errors}" }
 
@@ -237,5 +246,21 @@ private fun String.toCanonicalSigAlgName(): String = when (
     "ECDSASHA256", "ECDSAWITHSHA256", "SHA256WITHECDSA" -> "SHA256WITHECDSA"
     "ECDSASHA384", "ECDSAWITHSHA384", "SHA384WITHECDSA" -> "SHA384WITHECDSA"
     "ECDSASHA512", "ECDSAWITHSHA512", "SHA512WITHECDSA" -> "SHA512WITHECDSA"
+    "RSASHA256", "RSAWITHSHA256", "SHA256WITHRSA" -> "SHA256WITHRSA"
+    "RSASHA384", "RSAWITHSHA384", "SHA384WITHRSA" -> "SHA384WITHRSA"
+    "RSASHA512", "RSAWITHSHA512", "SHA512WITHRSA" -> "SHA512WITHRSA"
     else -> this
 }
+
+private fun ChainCertMeta.toZetaCertInfo() = ZetaCertInfo(
+    subjectDN = subjectDN ?: "",
+    sigAlgName = sigAlgSn?.toCanonicalSigAlgName() ?: "",
+    keyAlgorithm = keyTypeName ?: "",
+    keySize = keyBits ?: 0,
+    curveName = curveName,
+    notBefore = notBefore ?: 0L,
+    notAfter = notAfter ?: Long.MAX_VALUE,
+    san = san ?: emptyList(),
+)
+
+internal expect fun platformDefaultCaBundlePem(): ByteArray?

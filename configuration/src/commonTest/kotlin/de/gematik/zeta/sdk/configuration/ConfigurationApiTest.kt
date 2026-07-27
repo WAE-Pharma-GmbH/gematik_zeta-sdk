@@ -89,7 +89,7 @@ class ConfigurationApiImplTest {
         }
 
         assertEquals(
-            "Service discovery failed to load resource: https://example.comoauth-protected-resource",
+            "Service discovery failed to load resource: https://example.com/.well-known/oauth-protected-resource",
             error.message,
         )
     }

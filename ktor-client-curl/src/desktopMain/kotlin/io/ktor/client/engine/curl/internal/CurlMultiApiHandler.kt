@@ -250,6 +250,7 @@ internal class CurlMultiApiHandler : Closeable {
                 option(CURLOPT_DEBUGFUNCTION, staticCFunction(::curlDebugCallback))
                 option(CURLOPT_DEBUGDATA, responseDataRef)
             }
+
             request.connectTimeout?.let {
                 if (it != HttpTimeoutConfig.INFINITE_TIMEOUT_MS) {
                     option(CURLOPT_CONNECTTIMEOUT_MS, request.connectTimeout)

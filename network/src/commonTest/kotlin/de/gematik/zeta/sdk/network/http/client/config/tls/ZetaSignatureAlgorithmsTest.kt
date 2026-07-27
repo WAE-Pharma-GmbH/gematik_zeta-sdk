@@ -30,17 +30,19 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ZetaSignatureAlgorithmsTest {
-
     @Test
     fun ALLOWED_containsEcdsaAlgorithms() {
         // Arrange & Act
         val allowed = ZetaSignatureAlgorithms.ALLOWED
 
         // Assert
-        assertEquals(3, allowed.size)
+        assertEquals(6, allowed.size)
         assertTrue("ecdsa_secp256r1_sha256" in allowed)
         assertTrue("ecdsa_secp384r1_sha384" in allowed)
+        assertTrue("ecdsa_secp521r1_sha512" in allowed) // required for the certificate chain validation
         assertTrue("rsa_pkcs1_sha256" in allowed) // required for the certificate chain validation
+        assertTrue("rsa_pkcs1_sha384" in allowed) // required for the certificate chain validation
+        assertTrue("rsa_pkcs1_sha512" in allowed) // required for the certificate chain validation
     }
 
     @Test
@@ -49,11 +51,26 @@ class ZetaSignatureAlgorithmsTest {
         val allowed = ZetaSignatureAlgorithms.ALLOWED
 
         // Assert
-        assertEquals(3, allowed.size)
+        assertEquals(6, allowed.size)
         assertFalse("rsa_pss_rsae_sha256" in allowed)
         assertFalse("rsa_pss_rsae_sha384" in allowed)
         assertTrue("rsa_pkcs1_sha256" in allowed) // required for the certificate chain validation
+        assertTrue("rsa_pkcs1_sha384" in allowed) // required for the certificate chain validation
+        assertTrue("rsa_pkcs1_sha512" in allowed) // required for the certificate chain validation
+        assertTrue("ecdsa_secp521r1_sha512" in allowed) // required for the certificate chain validation
         ZetaSignatureAlgorithms.ALLOWED.forEach { assertTrue(it in allowed) }
+    }
+
+    @Test
+    fun ALLOWED_EE_AlgorithmsForTheEECertificateValidation() {
+        // Arrange & Act
+        val allowed = ZetaSignatureAlgorithms.ALLOWED_LEAF
+
+        // Assert
+        assertEquals(2, allowed.size)
+        assertTrue("ecdsa_secp256r1_sha256" in allowed)
+        assertTrue("ecdsa_secp384r1_sha384" in allowed)
+        ZetaSignatureAlgorithms.ALLOWED_LEAF.forEach { assertTrue(it in allowed) }
     }
 
     @Test
@@ -66,26 +83,6 @@ class ZetaSignatureAlgorithmsTest {
         assertTrue("sha1" in forbidden)
         assertTrue("md5" in forbidden)
         assertTrue("sha224" in forbidden)
-    }
-
-    @Test
-    fun ALLOWED_KEY_ALGORITHMS_containsEc() {
-        // Arrange & Act
-        val algorithms = ZetaSignatureAlgorithms.ALLOWED_KEY_ALGORITHMS
-
-        // Assert
-        assertEquals(1, algorithms.size)
-        assertTrue("EC" in algorithms)
-    }
-
-    @Test
-    fun ALLOWED_KEY_ALGORITHMS_doesNotcontainsRsa() {
-        // Arrange & Act
-        val algorithms = ZetaSignatureAlgorithms.ALLOWED_KEY_ALGORITHMS
-
-        // Assert
-        assertEquals(1, algorithms.size)
-        assertFalse("RSA" in algorithms)
     }
 
     @Test

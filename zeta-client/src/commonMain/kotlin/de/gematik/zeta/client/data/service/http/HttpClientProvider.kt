@@ -59,6 +59,11 @@ public interface HttpClientProvider {
     public suspend fun clearRegistration()
     public suspend fun logout()
     public suspend fun status(): SdkStatus
+    public fun updateTlsValidation(enabled: Boolean)
+    public fun updateTrustedCa(pemPath: String?)
+    public suspend fun discover()
+    public suspend fun register()
+    public suspend fun authenticate()
 }
 
 private const val demoClient = "ZETA-Test-Client"
@@ -66,12 +71,45 @@ private const val demoClient = "ZETA-Test-Client"
 public class HttpClientProviderImpl : HttpClientProvider {
     private lateinit var httpClient: ZetaHttpClient
     private lateinit var sdkClient: ZetaSdkClient
+    private lateinit var currentUrl: String
+
+    private var tlsValidationEnabled: Boolean = !DISABLE_SERVER_VALIDATION
+    private var trustedCaPemPath: String? = null
 
     override fun provideHttpClient(): ZetaHttpClient =
         httpClient
 
     override fun setupEnvUrl(url: String) {
+        currentUrl = url
         httpClient = prepareHttpClient(url)
+    }
+
+    override fun updateTlsValidation(enabled: Boolean) {
+        tlsValidationEnabled = enabled
+        rebuildIfReady()
+    }
+
+    override fun updateTrustedCa(pemPath: String?) {
+        trustedCaPemPath = pemPath
+        rebuildIfReady()
+    }
+
+    private fun rebuildIfReady() {
+        if (::currentUrl.isInitialized) {
+            httpClient = prepareHttpClient(currentUrl)
+        }
+    }
+
+    override suspend fun authenticate() {
+        sdkClient.authenticate()
+    }
+
+    override suspend fun register() {
+        sdkClient.register()
+    }
+
+    override suspend fun discover() {
+        sdkClient.discover()
     }
 
     override suspend fun forget() {
@@ -98,9 +136,7 @@ public class HttpClientProviderImpl : HttpClientProvider {
                 StorageConfig.Default(STORAGE_AES_KEY),
                 object : TpmConfig {},
                 AuthConfig(
-                    listOf(
-                        "zero:audience",
-                    ),
+                    listOf("zero:audience"),
                     30,
                     ASL_PROD,
                     when {
@@ -130,23 +166,26 @@ public class HttpClientProviderImpl : HttpClientProvider {
                                     }
                                 },
                             )
-
-                        else ->
-                            HardcodedTokenProvider()
+                        else -> HardcodedTokenProvider()
                     },
                     AttestationConfig.software(),
                     requiredRoleOid = REQUIRED_OID ?: "",
                 ),
                 getPlatformProduct(),
                 ZetaHttpClientBuilder()
-                    .disableServerValidation(DISABLE_SERVER_VALIDATION)
+                    .disableServerValidation(!tlsValidationEnabled)
+                    .let { builder ->
+                        trustedCaPemPath?.let { path ->
+                            builder.addCaPemFile(path)
+                        } ?: builder
+                    }
                     .logging(LogLevel.ALL),
             ),
         )
 
         return sdkClient.httpClient {
             logging(LogLevel.ALL)
-            disableServerValidation(DISABLE_SERVER_VALIDATION)
+            disableServerValidation(!tlsValidationEnabled)
             contentNegotiation(true)
         }
     }

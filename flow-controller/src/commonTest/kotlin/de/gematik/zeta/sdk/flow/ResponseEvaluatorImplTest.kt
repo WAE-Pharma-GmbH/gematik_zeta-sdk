@@ -62,10 +62,10 @@ class ResponseEvaluatorImplTest {
     }
 
     /**
-     * Response with 4xx aborts
+     * Response with 4xx proceed
      */
     @Test
-    fun evaluate_returns_abort_on_status_code_404() = runTest {
+    fun evaluate_returns_proceed_on_status_code_404() = runTest {
         // Arrange
         val storage = InMemoryStorage()
         val evaluator = ResponseEvaluatorImpl()
@@ -75,7 +75,7 @@ class ResponseEvaluatorImplTest {
         val directive = evaluator.evaluate(resp.call, FlowContextImpl(ResourceScope("", emptyList()), FakeForwardingClient(), storage), FlowOrchestrator.RetryState())
 
         // Assert
-        assertIs<FlowDirective.Abort>(directive)
+        assertIs<FlowDirective.Proceed>(directive)
     }
 
     private suspend fun responseWith(status: HttpStatusCode): HttpResponse {

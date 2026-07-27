@@ -49,7 +49,7 @@ import java.security.cert.CertificateFactory
 import java.security.cert.X509CRL
 import java.security.cert.X509Certificate
 
-actual class OcspHandlerImpl actual constructor() : OcspHandler {
+actual class RevocationHandlerImpl actual constructor() : RevocationHandler {
     init {
         if (Security.getProvider("BC") == null) {
             Security.addProvider(BouncyCastleProvider())
@@ -59,9 +59,11 @@ actual class OcspHandlerImpl actual constructor() : OcspHandler {
     private fun parse(der: ByteArray): X509Certificate =
         cf.generateCertificate(der.inputStream()) as X509Certificate
 
-    actual override fun getProducedAtEpochSeconds(ocspResponseDer: ByteArray): Long {
+    actual override fun getThisUpdateEpochSeconds(ocspResponseDer: ByteArray): Long {
         val basicResp = OCSPResp(ocspResponseDer).responseObject as BasicOCSPResp
-        return basicResp.producedAt.toInstant().epochSecond
+        val single = basicResp.responses.firstOrNull()
+            ?: error("No single response in OCSP response")
+        return single.thisUpdate.toInstant().epochSecond
     }
 
     actual override fun getNextUpdateEpochSeconds(
@@ -233,6 +235,11 @@ actual class OcspHandlerImpl actual constructor() : OcspHandler {
         }
 
         Log.i { "Certificate not found in CRL - status OK" }
+    }
+
+    actual override fun getCrlNextUpdateEpochSeconds(crlDer: ByteArray): Long? {
+        val crl = cf.generateCRL(crlDer.inputStream()) as X509CRL
+        return crl.nextUpdate?.toInstant()?.epochSecond
     }
 
     private fun extractOcspUrl(cert: X509Certificate): String? {

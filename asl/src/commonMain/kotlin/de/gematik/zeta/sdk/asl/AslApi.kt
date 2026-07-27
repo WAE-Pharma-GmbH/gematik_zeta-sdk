@@ -25,6 +25,7 @@
 package de.gematik.zeta.sdk.asl
 import de.gematik.zeta.sdk.authentication.AccessTokenProvider
 import de.gematik.zeta.sdk.authentication.HttpAuthHeaders
+import de.gematik.zeta.sdk.network.http.client.RevocationChecker
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
 import de.gematik.zeta.sdk.tpm.TpmProvider
 import io.ktor.client.request.HttpRequestBuilder
@@ -47,10 +48,10 @@ public interface AslApi {
 }
 
 public class AslApiImpl(
-    private val resource: String,
     internal val aslProdEnvironment: Boolean,
     internal val requiredRoleOid: String,
     private val aslStorage: AslStorage,
+    private val revocationChecker: RevocationChecker,
     private val zetaHttpClient: ZetaHttpClient,
     private val accessTokenProvider: AccessTokenProvider,
     private val tpmProvider: TpmProvider,
@@ -104,7 +105,7 @@ public class AslApiImpl(
     private suspend fun ensureHandshake(request: HttpRequestBuilder): EstablishedSession {
         aslStorage.getCurrentSession()?.let { return it }
 
-        var state = AslHandshakeState.create(zetaHttpClient, request, accessTokenProvider, tpmProvider, tlsValidationEnabled, resource)
+        var state = AslHandshakeState.create(zetaHttpClient, request, accessTokenProvider, tpmProvider, tlsValidationEnabled, aslStorage, revocationChecker)
         state = state
             .performMessage1AndReceiveMessage2()
             .processMessage2AndBuildMessage3(aslProdEnvironment, requiredRoleOid)

@@ -32,6 +32,7 @@ import de.gematik.zeta.sdk.clientregistration.ClientRegistrationStorage
 import de.gematik.zeta.sdk.clientregistration.ClientRegistrationStorageImpl
 import de.gematik.zeta.sdk.configuration.ConfigurationStorage
 import de.gematik.zeta.sdk.configuration.ConfigurationStorageImpl
+import de.gematik.zeta.sdk.network.http.client.RevocationStorage
 import de.gematik.zeta.sdk.storage.ResourceScope
 import de.gematik.zeta.sdk.storage.SdkStorage
 import de.gematik.zeta.sdk.tpm.TpmStorage
@@ -45,6 +46,7 @@ interface FlowContext {
     val authenticationStorage: AuthenticationStorage
     val tpmStorage: TpmStorage
     val aslStorage: AslStorage
+    val revocationStorage: RevocationStorage
 }
 
 /**
@@ -60,5 +62,6 @@ class FlowContextImpl(
     override val authenticationStorage: AuthenticationStorage = AuthenticationStorageImpl(storage, resourceScope),
     override val tpmStorage: TpmStorage = TpmStorageImpl(storage, resourceScope),
     override val aslStorage: AslStorage = AslStorageImpl(storage, resourceScope),
+    override val revocationStorage: RevocationStorage = RevocationStorage(storage, resourceScope),
 
 ) : FlowContext

@@ -24,22 +24,24 @@
 
 package de.gematik.zeta.sdk.crypto
 
-interface OcspHandler {
-    fun getProducedAtEpochSeconds(ocspResponseDer: ByteArray): Long
+interface RevocationHandler {
+    fun getThisUpdateEpochSeconds(ocspResponseDer: ByteArray): Long
     fun getNextUpdateEpochSeconds(ocspResponseDer: ByteArray, certDer: ByteArray, issuerDer: ByteArray): Long?
     fun validate(ocspResponseDer: ByteArray, certDer: ByteArray, issuerDer: ByteArray)
     suspend fun prepareOcspRequest(certDer: ByteArray, issuerDer: ByteArray): OcspRequestData
     fun extractCrlUrl(certDer: ByteArray): String?
     fun validateCrl(crlDer: ByteArray, certDer: ByteArray, issuerDer: ByteArray)
+    fun getCrlNextUpdateEpochSeconds(crlDer: ByteArray): Long?
 }
 
-expect class OcspHandlerImpl() : OcspHandler {
-    override fun getProducedAtEpochSeconds(ocspResponseDer: ByteArray): Long
+expect class RevocationHandlerImpl() : RevocationHandler {
+    override fun getThisUpdateEpochSeconds(ocspResponseDer: ByteArray): Long
     override fun getNextUpdateEpochSeconds(ocspResponseDer: ByteArray, certDer: ByteArray, issuerDer: ByteArray): Long?
     override fun validate(ocspResponseDer: ByteArray, certDer: ByteArray, issuerDer: ByteArray)
     override suspend fun prepareOcspRequest(certDer: ByteArray, issuerDer: ByteArray): OcspRequestData
     override fun extractCrlUrl(certDer: ByteArray): String?
     override fun validateCrl(crlDer: ByteArray, certDer: ByteArray, issuerDer: ByteArray)
+    override fun getCrlNextUpdateEpochSeconds(crlDer: ByteArray): Long?
 }
 
 data class OcspRequestData(

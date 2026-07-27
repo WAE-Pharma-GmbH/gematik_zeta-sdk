@@ -27,7 +27,11 @@ package de.gematik.zeta.sdk.asl
 import Jwk
 import de.gematik.zeta.sdk.authentication.AccessTokenParams
 import de.gematik.zeta.sdk.authentication.AccessTokenProvider
+import de.gematik.zeta.sdk.network.http.client.RevocationChecker
+import de.gematik.zeta.sdk.network.http.client.RevocationStorage
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
+import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.header
@@ -46,22 +50,23 @@ import kotlin.test.assertTrue
 class AslApiImplTest {
     val fakeTarget = "https://api.example.com/resource/data"
     val fakeToken = "dpop token"
-    val fakeResource = "test-resource"
     val fakeSession = "/session/abc123"
     val requiredOid = "1.2.276.0.76.4.261"
+
+    private fun testrevocationChecker(): RevocationChecker =
+        RevocationChecker(RevocationStorage(InMemoryStorage(), ResourceScope("", listOf())), HttpClient {})
 
     @Test
     fun decrypt_throwsException_sessionIsNull() = runTest {
         // Arrange
         val storage = FakeAslStorage(session = null)
         val sut = AslApiImpl(
-            resource = fakeResource,
             aslProdEnvironment = true,
             aslStorage = storage,
             zetaHttpClient = ZetaHttpClient(HttpClient {}),
             accessTokenProvider = FakeAccessTokenProvider(),
             tpmProvider = AslHandshakeStateTest.FakeTpmProvider(false),
-            requiredRoleOid = requiredOid,
+            requiredRoleOid = requiredOid, revocationChecker = testrevocationChecker(),
         )
         val encrypted = byteArrayOf(0x01, 0x02)
 
@@ -77,13 +82,12 @@ class AslApiImplTest {
         val session = buildSession()
         val storage = FakeAslStorage(session = session)
         val sut = AslApiImpl(
-            resource = fakeResource,
             aslProdEnvironment = true,
             aslStorage = storage,
             zetaHttpClient = ZetaHttpClient(HttpClient {}),
             accessTokenProvider = FakeAccessTokenProvider(),
             tpmProvider = AslHandshakeStateTest.FakeTpmProvider(false),
-            requiredRoleOid = requiredOid,
+            requiredRoleOid = requiredOid, revocationChecker = testrevocationChecker(),
         )
         val tooShortPayload = byteArrayOf(0x00)
 
@@ -99,13 +103,12 @@ class AslApiImplTest {
         val session = buildSession(cid = fakeSession)
         val storage = FakeAslStorage(session = session)
         val sut = AslApiImpl(
-            resource = fakeResource,
             aslProdEnvironment = true,
             aslStorage = storage,
             zetaHttpClient = ZetaHttpClient(HttpClient {}),
             accessTokenProvider = FakeAccessTokenProvider(),
             tpmProvider = AslHandshakeStateTest.FakeTpmProvider(false),
-            requiredRoleOid = requiredOid,
+            requiredRoleOid = requiredOid, revocationChecker = testrevocationChecker(),
         )
         val request = HttpRequestBuilder().apply {
             url { takeFrom(fakeTarget) }
@@ -127,13 +130,12 @@ class AslApiImplTest {
         val session = buildSession(cid = cid)
         val storage = FakeAslStorage(session = session)
         val sut = AslApiImpl(
-            resource = fakeResource,
             aslProdEnvironment = true,
             aslStorage = storage,
             zetaHttpClient = ZetaHttpClient(HttpClient {}),
             accessTokenProvider = FakeAccessTokenProvider(),
             tpmProvider = AslHandshakeStateTest.FakeTpmProvider(false),
-            requiredRoleOid = requiredOid,
+            requiredRoleOid = requiredOid, revocationChecker = testrevocationChecker(),
         )
         val request = HttpRequestBuilder().apply {
             url { takeFrom(fakeTarget) }
@@ -155,13 +157,12 @@ class AslApiImplTest {
         val storage = FakeAslStorage(session = session)
         FakeAccessTokenProvider()
         val sut = AslApiImpl(
-            resource = fakeResource,
             aslProdEnvironment = true,
             aslStorage = storage,
             zetaHttpClient = ZetaHttpClient(HttpClient {}),
             accessTokenProvider = FakeAccessTokenProvider(),
             tpmProvider = AslHandshakeStateTest.FakeTpmProvider(false),
-            requiredRoleOid = requiredOid,
+            requiredRoleOid = requiredOid, revocationChecker = testrevocationChecker(),
         )
         val request = HttpRequestBuilder().apply {
             url { takeFrom(fakeTarget) }
@@ -182,13 +183,12 @@ class AslApiImplTest {
         val session = buildSession(cid = fakeSession)
         val storage = FakeAslStorage(session = session)
         val sut = AslApiImpl(
-            resource = fakeResource,
             aslProdEnvironment = true,
             aslStorage = storage,
             zetaHttpClient = ZetaHttpClient(HttpClient {}),
             accessTokenProvider = FakeAccessTokenProvider(),
             tpmProvider = AslHandshakeStateTest.FakeTpmProvider(false),
-            requiredRoleOid = requiredOid,
+            requiredRoleOid = requiredOid, revocationChecker = testrevocationChecker(),
         )
         val request = HttpRequestBuilder().apply {
             url { takeFrom(fakeTarget) }
@@ -209,13 +209,12 @@ class AslApiImplTest {
         val session = buildSession(cid = fakeSession)
         val storage = FakeAslStorage(session = session)
         val sut = AslApiImpl(
-            resource = fakeResource,
             aslProdEnvironment = true,
             aslStorage = storage,
             zetaHttpClient = ZetaHttpClient(HttpClient {}),
             accessTokenProvider = FakeAccessTokenProvider(),
             tpmProvider = AslHandshakeStateTest.FakeTpmProvider(false),
-            requiredRoleOid = requiredOid,
+            requiredRoleOid = requiredOid, revocationChecker = testrevocationChecker(),
         )
         val request = HttpRequestBuilder().apply {
             url { takeFrom(fakeTarget) }
@@ -237,13 +236,12 @@ class AslApiImplTest {
         val storage = FakeAslStorage(session = session)
         val tokenProvider = FakeAccessTokenProvider()
         val sut = AslApiImpl(
-            resource = fakeResource,
             aslProdEnvironment = true,
             aslStorage = storage,
             zetaHttpClient = ZetaHttpClient(HttpClient {}),
             accessTokenProvider = tokenProvider,
             tpmProvider = AslHandshakeStateTest.FakeTpmProvider(false),
-            requiredRoleOid = requiredOid,
+            requiredRoleOid = requiredOid, revocationChecker = testrevocationChecker(),
         )
         val request = HttpRequestBuilder().apply {
             url { takeFrom(fakeTarget) }
@@ -265,13 +263,12 @@ class AslApiImplTest {
         val storage = FakeAslStorage(session = session)
         val tokenProvider = FakeAccessTokenProvider()
         val sut = AslApiImpl(
-            resource = fakeResource,
             aslProdEnvironment = true,
             aslStorage = storage,
             zetaHttpClient = ZetaHttpClient(HttpClient {}),
             accessTokenProvider = FakeAccessTokenProvider(),
             tpmProvider = AslHandshakeStateTest.FakeTpmProvider(false),
-            requiredRoleOid = requiredOid,
+            requiredRoleOid = requiredOid, revocationChecker = testrevocationChecker(),
         )
         val request = HttpRequestBuilder().apply {
             url { takeFrom(fakeTarget) }
@@ -292,13 +289,12 @@ class AslApiImplTest {
         val storage = FakeAslStorage(session = session)
         val tokenProvider = FakeAccessTokenProvider()
         val sut = AslApiImpl(
-            resource = fakeResource,
             aslProdEnvironment = true,
             aslStorage = storage,
             zetaHttpClient = ZetaHttpClient(HttpClient {}),
             accessTokenProvider = tokenProvider,
             tpmProvider = AslHandshakeStateTest.FakeTpmProvider(false),
-            requiredRoleOid = requiredOid,
+            requiredRoleOid = requiredOid, revocationChecker = testrevocationChecker(),
         )
         val request = HttpRequestBuilder().apply {
             url { takeFrom(fakeTarget) }
@@ -319,13 +315,12 @@ class AslApiImplTest {
         val session = buildSession(cid = fakeSession)
         val storage = FakeAslStorage(session = session)
         val sut = AslApiImpl(
-            resource = fakeResource,
             aslProdEnvironment = true,
             aslStorage = storage,
             zetaHttpClient = ZetaHttpClient(HttpClient {}),
             accessTokenProvider = FakeAccessTokenProvider(),
             tpmProvider = AslHandshakeStateTest.FakeTpmProvider(false),
-            requiredRoleOid = requiredOid,
+            requiredRoleOid = requiredOid, revocationChecker = testrevocationChecker(),
         )
         val request = HttpRequestBuilder().apply {
             url { takeFrom(fakeTarget) }
@@ -347,13 +342,12 @@ class AslApiImplTest {
         val session = buildSession(cid = fakeSession, prod = true)
         val storage = FakeAslStorage(session = session)
         val sut = AslApiImpl(
-            resource = fakeResource,
             aslProdEnvironment = true,
             aslStorage = storage,
             zetaHttpClient = ZetaHttpClient(HttpClient {}),
             accessTokenProvider = FakeAccessTokenProvider(),
             tpmProvider = AslHandshakeStateTest.FakeTpmProvider(false),
-            requiredRoleOid = requiredOid,
+            requiredRoleOid = requiredOid, revocationChecker = testrevocationChecker(),
         )
         val request = HttpRequestBuilder().apply {
             url { takeFrom(fakeTarget) }
@@ -374,13 +368,12 @@ class AslApiImplTest {
         val session = buildSession(cid = fakeSession, prod = false)
         val storage = FakeAslStorage(session = session)
         val sut = AslApiImpl(
-            resource = fakeResource,
             aslProdEnvironment = false,
             aslStorage = storage,
             zetaHttpClient = ZetaHttpClient(HttpClient {}),
             accessTokenProvider = FakeAccessTokenProvider(),
             tpmProvider = AslHandshakeStateTest.FakeTpmProvider(false),
-            requiredRoleOid = requiredOid,
+            requiredRoleOid = requiredOid, revocationChecker = testrevocationChecker(),
         )
         val request = HttpRequestBuilder().apply {
             url { takeFrom(fakeTarget) }
@@ -401,13 +394,12 @@ class AslApiImplTest {
         val session = buildSession(cid = null)
         val storage = FakeAslStorage(session = session)
         val sut = AslApiImpl(
-            resource = fakeResource,
             aslProdEnvironment = true,
             aslStorage = storage,
             zetaHttpClient = ZetaHttpClient(HttpClient {}),
             accessTokenProvider = FakeAccessTokenProvider(),
             tpmProvider = AslHandshakeStateTest.FakeTpmProvider(false),
-            requiredRoleOid = requiredOid,
+            requiredRoleOid = requiredOid, revocationChecker = testrevocationChecker(),
         )
         val request = HttpRequestBuilder().apply {
             url { takeFrom(fakeTarget) }
@@ -456,6 +448,11 @@ class AslApiImplTest {
         var savedSession: EstablishedSession? = null
 
         override suspend fun getCurrentSession(): EstablishedSession? = session
+        override suspend fun getCachedCertData(certificateHashHex: String, certificateDescriptionVersion: Int): CertData? = null
+        override suspend fun saveCachedCertData(certificateHashHex: String, certificateDescriptionVersion: Int, certData: CertData) {
+            // no-opts
+        }
+
         override suspend fun saveSession(session: EstablishedSession) {
             sessionWasSaved = true
             savedSession = session

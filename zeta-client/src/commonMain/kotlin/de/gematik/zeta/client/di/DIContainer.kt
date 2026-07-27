@@ -27,6 +27,8 @@ package de.gematik.zeta.client.di
 import de.gematik.zeta.client.config.getConfig
 import de.gematik.zeta.client.data.repository.PrescriptionRepository
 import de.gematik.zeta.client.data.repository.PrescriptionRepositoryImpl
+import de.gematik.zeta.client.data.repository.SettingsRepository
+import de.gematik.zeta.client.data.repository.SettingsRepositoryImpl
 import de.gematik.zeta.client.data.service.PrescriptionService
 import de.gematik.zeta.client.data.service.PrescriptionServiceImpl
 import de.gematik.zeta.client.data.service.fake.FakePrescriptionService
@@ -42,6 +44,7 @@ public const val POPP_TOKEN_HEADER_NAME: String = "PoPP"
 
 public object DIContainer {
     public val httpClientProvider: HttpClientProvider = HttpClientProviderImpl()
+    public val settingsRepository: SettingsRepository = SettingsRepositoryImpl()
 
     public val prescriptionService: PrescriptionService =
         if (USE_FAKE_SERVICES) {

@@ -71,6 +71,7 @@ setupBuildLogic {
                     executable {
                         entryPoint = "de.gematik.zeta.client.main"
                         baseName = "zeta-attestation-service"
+                        linkerOpts += listOf("-framework", "Security", "-framework", "CoreFoundation")
                     }
                 }
             }

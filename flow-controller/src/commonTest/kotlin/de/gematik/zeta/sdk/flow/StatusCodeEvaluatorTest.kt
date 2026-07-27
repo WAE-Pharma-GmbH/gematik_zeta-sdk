@@ -90,7 +90,7 @@ class StatusCodeEvaluatorTest {
         val directive = evaluator.evaluate(resp.call, dummyCtx(), FlowOrchestrator.RetryState())
 
         // Assert
-        assertIs<FlowDirective.Abort>(directive)
+        assertIs<FlowDirective.Proceed>(directive)
     }
 
     @Test
@@ -114,7 +114,7 @@ class StatusCodeEvaluatorTest {
         val directive = evaluator.evaluate(resp.call, dummyCtx(), FlowOrchestrator.RetryState())
 
         // Assert
-        assertIs<FlowDirective.Abort>(directive)
+        assertIs<FlowDirective.Proceed>(directive)
     }
 
     @Test
@@ -126,7 +126,7 @@ class StatusCodeEvaluatorTest {
         val directive = evaluator.evaluate(resp.call, dummyCtx(), FlowOrchestrator.RetryState())
 
         // Assert
-        assertIs<FlowDirective.Abort>(directive)
+        assertIs<FlowDirective.Proceed>(directive)
     }
 
     @Test
@@ -138,7 +138,7 @@ class StatusCodeEvaluatorTest {
         val directive = evaluator.evaluate(resp.call, dummyCtx(), FlowOrchestrator.RetryState())
 
         // Assert
-        assertIs<FlowDirective.Abort>(directive)
+        assertIs<FlowDirective.Proceed>(directive)
     }
 
     @Test

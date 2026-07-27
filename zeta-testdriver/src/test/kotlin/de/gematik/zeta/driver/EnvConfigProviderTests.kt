@@ -85,18 +85,6 @@ class EnvConfigProviderTest {
     }
 
     @Test
-    fun buildConfigFromProperties_throwsError_whenFachdienstUrlMissing() {
-        // Arrange
-        val props = Properties()
-        val provider = EnvConfigProvider()
-
-        // Act & Assert
-        assertFailsWith<IllegalStateException> {
-            provider.buildConfigFromProperties(props, 1)
-        }
-    }
-
-    @Test
     fun mergeWithEnvFallback_prefersProvidedKeystoreFile_whenNotBlank() {
         // Arrange
         val provider = EnvConfigProvider()

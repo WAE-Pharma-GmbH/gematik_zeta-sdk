@@ -75,6 +75,7 @@ public open class ZetaHttpClientBuilder(
     private var security: SecurityConfig = SecurityConfig()
     private var monitoring: MonitoringConfig = MonitoringConfig()
     private var contentNegotiationEnabled: Boolean = false
+    private var revocationChecker: RevocationChecker? = null
 
     /**
      * Configure connection and/or overall request timeouts (milliseconds).
@@ -204,6 +205,12 @@ public open class ZetaHttpClientBuilder(
         contentNegotiationEnabled = enabled
     }
 
+    public fun revocationChecker(
+        checker: RevocationChecker,
+    ): ZetaHttpClientBuilder = apply {
+        revocationChecker = checker
+    }
+
     /**
      * Build a configured [HttpClient] using the current builder state.
      *
@@ -212,7 +219,10 @@ public open class ZetaHttpClientBuilder(
      * @return A ready-to-use [HttpClient] instance.
      */
     public fun build(): ZetaHttpClient =
-        zetaHttpClient(configure = baseConfig())
+        zetaHttpClient(
+            configure = baseConfig(),
+            dependencies = runtimeDependencies(),
+        )
 
     /**
      * Build a configured [HttpClient] using the current builder state.
@@ -221,8 +231,14 @@ public open class ZetaHttpClientBuilder(
      * @param addExtras Lambda to add extra custom configuration.
      * @return A ready-to-use [HttpClient] instance.
      */
-    public fun build(addExtras: (HttpClientConfig<*>.() -> Unit)? = null): ZetaHttpClient =
-        zetaHttpClient(configure = baseConfig(), addExtras = addExtras)
+    public fun build(
+        addExtras: (HttpClientConfig<*>.() -> Unit)? = null,
+    ): ZetaHttpClient =
+        zetaHttpClient(
+            configure = baseConfig(),
+            dependencies = runtimeDependencies(),
+            addExtras = addExtras,
+        )
 
     /**
      * Build a configured [HttpClient] using the current builder state, but with a different baseUrl.
@@ -233,7 +249,10 @@ public open class ZetaHttpClientBuilder(
      * @return A ready-to-use [HttpClient] instance.
      */
     public open fun build(newUrl: String): ZetaHttpClient =
-        zetaHttpClient(configure = baseConfig(newUrl))
+        zetaHttpClient(
+            configure = baseConfig(newUrl),
+            dependencies = runtimeDependencies(),
+        )
 
     /**
      * Build a configured [HttpClient] using the current builder state with an optional engine override.
@@ -246,8 +265,16 @@ public open class ZetaHttpClientBuilder(
         zetaHttpClient(
             configure = {
                 baseConfig()(this)
-                if (engine != null) this.engine(engine)
+                if (engine != null) {
+                    this.engine(engine)
+                }
             },
+            dependencies = runtimeDependencies(),
+        )
+
+    private fun runtimeDependencies(): HttpClientDependencies =
+        HttpClientDependencies(
+            revocationChecker = revocationChecker,
         )
 
     private fun baseConfig(urlOverride: String = baseUrl): ClientConfig.() -> Unit = {
@@ -269,6 +296,7 @@ public open class ZetaHttpClientBuilder(
                 copy.security = this.security
                 copy.monitoring = this.monitoring
                 copy.contentNegotiationEnabled = this.contentNegotiationEnabled
+                copy.revocationChecker = revocationChecker
             }
 
     public val isServerValidationDisabled: Boolean

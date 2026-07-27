@@ -10,6 +10,7 @@ plugins {
     id("de.gematik.zeta.sdk.build-logic.sharedlib")
     id("de.gematik.zeta.sdk.build-logic.xcframework")
     id("co.touchlab.skie")
+    kotlin("plugin.serialization")
 }
 
 setupBuildLogic {

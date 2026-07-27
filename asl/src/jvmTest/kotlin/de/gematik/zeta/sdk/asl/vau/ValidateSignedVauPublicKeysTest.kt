@@ -25,19 +25,23 @@
 package de.gematik.zeta.sdk.asl.vau
 
 import de.gematik.zeta.sdk.asl.AslCertDataApi
+import de.gematik.zeta.sdk.asl.AslStorageImpl
 import de.gematik.zeta.sdk.asl.CertData
-import de.gematik.zeta.sdk.asl.Environment
 import de.gematik.zeta.sdk.asl.SignedVauPublicKeys
 import de.gematik.zeta.sdk.asl.VauKeys
 import de.gematik.zeta.sdk.asl.cbor
 import de.gematik.zeta.sdk.crypto.EcPointP256
 import de.gematik.zeta.sdk.crypto.EcdhSigner
 import de.gematik.zeta.sdk.crypto.X509CertValidator
+import de.gematik.zeta.sdk.network.http.client.RevocationChecker
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
+import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.url
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -114,6 +118,8 @@ class ValidateSignedVauPublicKeysTest {
     ): CertValidationBundle {
         val fetcher = mockk<AslCertDataApi>()
         every { runBlocking { fetcher.fetch(any(), any()) } } returns certData
+        val revocationChecker: RevocationChecker = mockk(relaxed = true)
+
         return CertValidationBundle(
             http = HttpContext(
                 client = ZetaHttpClient(HttpClient(MockEngine { error("not called") })),
@@ -124,6 +130,7 @@ class ValidateSignedVauPublicKeysTest {
             ocspValidator = mockk(relaxed = true),
             ecdhSigner = ecdhSigner,
             tiTrustAnchors = tiTrustAnchors,
+            certDataCache = AslStorageImpl(InMemoryStorage(), ResourceScope("", emptyList())), revocationChecker = revocationChecker,
         )
     }
 
@@ -291,12 +298,22 @@ class ValidateSignedVauPublicKeysTest {
 
     @Test
     fun validateSignedVauPublicKeys_succeedsWhenAllValid() = runTest {
+        val revocationChecker: RevocationChecker = mockk(relaxed = true)
+
+        coEvery {
+            revocationChecker.validate(
+                stapledOcspResponse = any(),
+                certDer = any(),
+                issuerDer = any(),
+            )
+        } returns Unit
+
         validateSignedVauPublicKeys(
             signed = buildSigned(),
             validation = buildBundle(),
             clock = FixedClock(now - oneDay),
-            environment = Environment.Testing,
             requiredRoleOid = requiredOid,
+
         )
     }
 
@@ -307,7 +324,6 @@ class ValidateSignedVauPublicKeysTest {
                 signed = buildSigned(),
                 validation = buildBundle(tiTrustAnchors = emptyList()),
                 clock = FixedClock(now - oneDay),
-                environment = Environment.Testing,
                 requiredRoleOid = requiredOid,
             )
         }
@@ -321,7 +337,6 @@ class ValidateSignedVauPublicKeysTest {
                 signed = buildSigned(),
                 validation = buildBundle(certChainValidator = buildValidator(professionOids = listOf("1.2.3"))),
                 clock = FixedClock(now - oneDay),
-                environment = Environment.Testing,
                 requiredRoleOid = requiredOid,
             )
         }
@@ -335,7 +350,6 @@ class ValidateSignedVauPublicKeysTest {
                 signed = buildSigned(),
                 validation = buildBundle(ecdhSigner = buildSigner(false)),
                 clock = FixedClock(now - oneDay),
-                environment = Environment.Testing,
                 requiredRoleOid = requiredOid,
             )
         }

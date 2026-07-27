@@ -33,7 +33,11 @@ import de.gematik.zeta.sdk.crypto.AesGcmCipherImpl
 import de.gematik.zeta.sdk.crypto.EcdhP256Kem
 import de.gematik.zeta.sdk.crypto.KeyPair
 import de.gematik.zeta.sdk.crypto.ML768Kem
+import de.gematik.zeta.sdk.network.http.client.RevocationChecker
+import de.gematik.zeta.sdk.network.http.client.RevocationStorage
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
+import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import de.gematik.zeta.sdk.tpm.TpmProvider
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -57,6 +61,8 @@ import kotlin.uuid.Uuid
 
 class AslHandshakeStateTest {
     private val oid = "1.2.276.0.76.4.261"
+    private val revStorage =
+        RevocationChecker(RevocationStorage(InMemoryStorage(), ResourceScope("", listOf())), HttpClient {})
 
     @Test
     fun create_initializesState_validParameters() {
@@ -66,7 +72,7 @@ class AslHandshakeStateTest {
         val tokenProvider = FakeAccessTokenProvider()
         val fakeTpm = FakeTpmProvider(false)
         // Act
-        val result = AslHandshakeState.create(httpClient, request, tokenProvider, fakeTpm, false, "")
+        val result = AslHandshakeState.create(httpClient, request, tokenProvider, fakeTpm, false, AslStorageImpl(InMemoryStorage(), ResourceScope("", emptyList())), revStorage)
 
         // Assert
         assertEquals(request, result.request)
@@ -342,7 +348,7 @@ class AslHandshakeStateTest {
         val tokenProvider = FakeAccessTokenProvider()
         val fakeTpm = FakeTpmProvider(false)
 
-        val result = AslHandshakeState.create(httpClient, request, tokenProvider, fakeTpm, tlsValidation = true, "")
+        val result = AslHandshakeState.create(httpClient, request, tokenProvider, fakeTpm, tlsValidation = true, AslStorageImpl(InMemoryStorage(), ResourceScope("", emptyList())), revStorage)
 
         assertEquals(true, result.tlsValidation)
     }
@@ -352,7 +358,7 @@ class AslHandshakeStateTest {
         val httpClient = ZetaHttpClient(HttpClient())
         val request = buildRequest()
 
-        val result = AslHandshakeState.create(httpClient, request, FakeAccessTokenProvider(), FakeTpmProvider(false), tlsValidation = false, "")
+        val result = AslHandshakeState.create(httpClient, request, FakeAccessTokenProvider(), FakeTpmProvider(false), tlsValidation = false, AslStorageImpl(InMemoryStorage(), ResourceScope("", emptyList())), revStorage)
 
         assertEquals(false, result.tlsValidation)
     }
@@ -625,7 +631,7 @@ class AslHandshakeStateTest {
             message4 = message4,
             accessTokenProvider = FakeAccessTokenProvider(),
             tpmProvider = FakeTpmProvider(false),
-            resource = "",
+            storage = AslStorageImpl(InMemoryStorage(), ResourceScope("", emptyList())), revocationChecker = revStorage,
         )
     }
 }

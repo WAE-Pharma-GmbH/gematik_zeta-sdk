@@ -27,6 +27,7 @@ package de.gematik.zeta.sdk.asl.vau
 import de.gematik.zeta.sdk.asl.AslApiImplTest
 import de.gematik.zeta.sdk.asl.AslHandshakeState
 import de.gematik.zeta.sdk.asl.AslHandshakeStateTest
+import de.gematik.zeta.sdk.asl.AslStorageImpl
 import de.gematik.zeta.sdk.authentication.AccessTokenProvider
 import de.gematik.zeta.sdk.authentication.HttpAuthHeaders
 import de.gematik.zeta.sdk.crypto.EcdhP256Kem
@@ -34,8 +35,12 @@ import de.gematik.zeta.sdk.crypto.Kem
 import de.gematik.zeta.sdk.crypto.KemEncapResult
 import de.gematik.zeta.sdk.crypto.KeyPair
 import de.gematik.zeta.sdk.crypto.ML768Kem
+import de.gematik.zeta.sdk.network.http.client.RevocationChecker
+import de.gematik.zeta.sdk.network.http.client.RevocationStorage
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpClient
 import de.gematik.zeta.sdk.network.http.client.ZetaHttpResponse
+import de.gematik.zeta.sdk.storage.InMemoryStorage
+import de.gematik.zeta.sdk.storage.ResourceScope
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -396,6 +401,9 @@ class Message1Test {
         httpClient: ZetaHttpClient,
         accessTokenProvider: AccessTokenProvider,
     ): AslHandshakeState {
+        val storage =
+            RevocationChecker(RevocationStorage(InMemoryStorage(), ResourceScope("", listOf())), HttpClient {})
+
         return AslHandshakeState(
             request = request,
             httpClient = httpClient,
@@ -409,7 +417,7 @@ class Message1Test {
             message4 = null,
             accessTokenProvider = accessTokenProvider,
             tpmProvider = AslHandshakeStateTest.FakeTpmProvider(false),
-            resource = "",
+            storage = AslStorageImpl(InMemoryStorage(), ResourceScope("", emptyList())), revocationChecker = storage,
         )
     }
 

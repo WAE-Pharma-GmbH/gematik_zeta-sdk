@@ -15,7 +15,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyDescriptionAttribute("Managed C# wrapper around the ZETA native SDK (libzeta_sdk).")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("0.5.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.5.0+a0c4b29a7e01f4ba442246481258620fe57279ce")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.5.0+440cd93d98d3c845b0fafdcc92585a288e773d2b")]
 [assembly: System.Reflection.AssemblyProductAttribute("Gematik.ZetaSdk")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Gematik.ZetaSdk")]
 [assembly: System.Reflection.AssemblyVersionAttribute("0.5.0.0")]

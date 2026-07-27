@@ -75,7 +75,7 @@ class ConfigurationApiImpl(
             val client = httpClientBuilder.build(baseUrl)
             try {
                 val response = client.get(PROTECTED_RESOURCE_PATH)
-                handleResponse(resourceUrl + PROTECTED_RESOURCE_PATH, response)
+                handleResponse(baseUrl + PROTECTED_RESOURCE_PATH, response)
             } finally {
                 client.close()
             }
@@ -99,7 +99,7 @@ class ConfigurationApiImpl(
             val client = httpClientBuilder.build(baseUrl)
             try {
                 val response = client.get(AUTH_SERVER_PATH)
-                handleResponse(authFqdns + AUTH_SERVER_PATH, response)
+                handleResponse(baseUrl + AUTH_SERVER_PATH, response)
             } finally {
                 client.close()
             }
