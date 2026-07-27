@@ -59,7 +59,11 @@ public sealed class ZetaClient : IDisposable
         if (ptr == IntPtr.Zero)
             throw new ZetaSdkException("ZetaSdk_buildZetaClient returned null. Check your configuration.");
 
-        return new ZetaClient(ptr, instance._customSmcbHandle);
+        return new ZetaClient(ptr, instance._customSmcbHandle)
+        {
+            _customStorageHandle = instance._customStorageHandle,
+            _customLogHandle     = instance._customLogHandle
+        };
     }
 
     public ZetaHttpClient CreateHttpClient()
@@ -126,7 +130,7 @@ public sealed class ZetaClient : IDisposable
         return ZetaSdkNative.ZetaSdk_clearRegistration(_ptr);
     }
 
-    public void OpenWebSocket(
+    public int OpenWebSocket(
         string url,
         IReadOnlyDictionary<string, string>? headers,
         Action<WsSession> handler)
@@ -147,9 +151,20 @@ public sealed class ZetaClient : IDisposable
 
         ZetaSdkNative.ZetaSdk_Client_ws(_ptr, urlPtr, urlBytes.Length, handlerPtr, hdrPtr, hdrLen);
         GC.KeepAlive(nativeDelegate);
+
+        return GetLastError() == null ? 0 : -1;
     }
 
-    public void Dispose()
+    public static string? GetLastError()
+    {
+        var ptr = ZetaSdkNative.ZetaSdk_getLastError();
+        if (ptr == IntPtr.Zero) return null;
+        var message = Marshal.PtrToStringUTF8(ptr);
+        ZetaSdkNative.ZetaSdk_freeLastError(ptr);
+        return message;
+    }
+
+  public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;

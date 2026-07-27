@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
      <TargetFramework>net10.0</TargetFramework>
@@ -7,7 +7,8 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
-    <!--PackageReference Include="ZetaSdk.Client" Version="0.5.0" /-->
-    <ProjectReference Include="../ZetaSdk.csproj" />
+    <Reference Include="Gematik.ZetaSdk">
+      <HintPath>..\bin\Debug\net10.0\Gematik.ZetaSdk.dll</HintPath>
+    </Reference>
   </ItemGroup>
 </Project>
