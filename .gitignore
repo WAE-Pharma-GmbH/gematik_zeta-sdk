@@ -29,3 +29,6 @@ azure-configs.properties
 .githubignore
 .dependencyLicenses
 
+
+**/bin/
+**/obj/
