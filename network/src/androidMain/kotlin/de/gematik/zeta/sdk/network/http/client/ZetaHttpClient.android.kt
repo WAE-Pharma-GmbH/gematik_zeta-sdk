@@ -24,76 +24,79 @@
 
 package de.gematik.zeta.sdk.network.http.client
 
-import de.gematik.zeta.sdk.network.http.client.config.ClientConfig
-import io.ktor.client.HttpClient
-import io.ktor.client.HttpClientConfig
-import io.ktor.client.engine.okhttp.OkHttp
-import okhttp3.OkHttpClient
-import okhttp3.tls.HandshakeCertificates
-import java.io.ByteArrayInputStream
+import android.os.Build
+import de.gematik.zeta.android.SdkAndroidContext
+import de.gematik.zeta.logging.Log
+import de.gematik.zeta.sdk.network.http.client.config.tls.ZetaTlsProtocols.TLS_1_2
+import org.conscrypt.Conscrypt
+import org.conscrypt.ZetaConscryptStaple
+import java.io.File
+import java.security.Provider
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLException
+import javax.net.ssl.SSLSession
+import javax.net.ssl.SSLSocketFactory
+
+internal actual fun loadCaFromFile(
+    path: String,
+    certFactory: CertificateFactory,
+): List<X509Certificate> =
+    SdkAndroidContext.get().assets.open(File(path).name).use { input ->
+        certFactory.generateCertificates(input).map { it as X509Certificate }
+    }
+
+internal actual fun createPlatformSslSocketFactory(base: SSLSocketFactory): SSLSocketFactory =
+    ZetaSslSocketAndroidFactory(base)
 
 /**
- * JVM/Android actual that builds an OkHttp-backed [HttpClient].
+ * Conscrypt provider backing the SDK's TLS stack.
  *
- * Responsibilities:
- * 1. Parse additional CA certificates from [cfg.security.additionalCaPem] (PEM strings),
- *    and append them to the platform trust store via OkHttp's [HandshakeCertificates].
- * 2. Create a preconfigured [okhttp3.OkHttpClient] that uses the resulting SSL context +
- *    trust manager.
- * 3. Build a Ktor [HttpClient] with the OkHttp engine, applying the shared [commonSetup].
- *
- * Security notes:
- * - Extra CAs are trusted for **server authentication** only (no mutual TLS/client certs here).
- * - Each entry in [cfg.security.additionalCaPem] must be a **complete PEM** block, including
- *   the delimiters:
- *
- *     -----BEGIN CERTIFICATE-----
- *     (base64)
- *     -----END CERTIFICATE-----
- *
- * - Invalid PEMs will cause a [java.security.cert.CertificateException] at parse time.
- *
- * Lifecycle:
- * - The provided OkHttpClient instance is passed to Ktor as `preconfigured`. If you reuse
- *   that instance elsewhere, be mindful of its dispatcher/connection-pool lifecycle.
- *
- * @param cfg Finalized client configuration (timeouts, retries, security, etc.).
- * @param commonSetup Cross-platform Ktor configuration to apply to the client (plugins, JSON, …).
- * @return A ready-to-use Ktor [HttpClient] using OkHttp on JVM/Android.
+ * Bundled so the SDK can read the server's stapled OCSP response.
+ * Android exposes staples only via `ExtendedSSLSession.getStatusResponses()` (API 37+), while
+ * minSdk is 28; building the SDK's [SSLContext] from Conscrypt makes every session a
+ * `ConscryptSession`, whose `statusResponses` is readable on all supported levels
  */
-internal actual fun buildPlatformClient(
-    cfg: ClientConfig,
-    dependencies: HttpClientDependencies,
-    commonSetup: HttpClientConfig<*>.() -> Unit,
-): HttpClient {
-    // Parse additional CA PEMs to X.509 certificates.
-    val certFactory = CertificateFactory.getInstance("X.509")
-
-    // Each string is expected to be a full PEM including BEGIN/END delimiters.
-    val extraCerts: List<X509Certificate> = cfg.security.additionalCaPem.map { pem ->
-        certFactory.generateCertificate(ByteArrayInputStream(pem.toByteArray())) as X509Certificate
+private val conscryptProvider: Provider by lazy {
+    if (!Conscrypt.isAvailable()) {
+        val abis = Build.SUPPORTED_ABIS?.toList() ?: emptyList()
+        throw SSLException(
+            "gematik TLS compliance failure: Conscrypt is unavailable, OCSP stapling cannot be " +
+                "verified (abis=$abis)",
+        )
     }
-
-    // Build a trust manager that combines platform CAs with the extra CAs.
-    val handshakeCerts = HandshakeCertificates.Builder()
-        .addPlatformTrustedCertificates()
-        .apply { extraCerts.forEach { addTrustedCertificate(it) } }
-        .build()
-
-    // Preconfigure OkHttp with the custom trust manager + SSLSocketFactory.
-    val okClient = OkHttpClient.Builder()
-        .sslSocketFactory(handshakeCerts.sslSocketFactory(), handshakeCerts.trustManager)
-        .build()
-
-    // Create the Ktor client with OkHttp engine, applying shared setup and the preconfigured client.
-    return HttpClient(OkHttp) {
-        this.apply {
-            commonSetup(this)
-            engine {
-                preconfigured = okClient
-            }
+    Conscrypt.newProvider().also { provider ->
+        val version = Conscrypt.version()
+        val versionText = if (version == null) {
+            "unknown"
+        } else {
+            "${version.major()}.${version.minor()}.${version.patch()}"
         }
+        Log.i { "ZetaTls: TLS stack provider=${provider.name}, Conscrypt=$versionText" }
     }
+}
+
+internal actual fun createPlatformSslContext(): SSLContext =
+    createPlatformSslContext(onAndroidRuntime = Build.SUPPORTED_ABIS != null)
+
+/**
+ * @param onAndroidRuntime `false` only under host-JVM unit tests, where [Build.SUPPORTED_ABIS] is null;
+ * Device always reports its ABIs.
+ */
+internal fun createPlatformSslContext(onAndroidRuntime: Boolean): SSLContext {
+    if (!onAndroidRuntime) {
+        Log.w { "ZetaTls: not an Android runtime, using the platform TLS provider (no OCSP staple)" }
+        return SSLContext.getInstance(TLS_1_2)
+    }
+    return SSLContext.getInstance(TLS_1_2, conscryptProvider)
+}
+
+internal actual fun extractStaple(session: SSLSession): ByteArray? {
+    val statusResponses = ZetaConscryptStaple.statusResponses(session)
+    if (statusResponses == null) {
+        Log.w { "ZetaTls: session is not a ConscryptSession (${session.javaClass.name})" }
+        return null
+    }
+    return statusResponses.firstOrNull()
 }

@@ -24,12 +24,14 @@
 
 package de.gematik.zeta.sdk.network.http.client
 
+import de.gematik.zeta.sdk.crypto.OcspValidity
 import de.gematik.zeta.sdk.crypto.RevocationHandler
 import de.gematik.zeta.sdk.network.http.client.config.ClientConfig
 import de.gematik.zeta.sdk.network.http.client.config.ProxyConfig
 import de.gematik.zeta.sdk.network.http.client.config.ProxyType
 import de.gematik.zeta.sdk.storage.InMemoryStorage
 import de.gematik.zeta.sdk.storage.ResourceScope
+import de.gematik.zeta.time.SystemZetaClock
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -61,6 +63,7 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.tls.HandshakeCertificates
 import okhttp3.tls.HeldCertificate
 import java.net.InetAddress
+import javax.net.ssl.SSLSocket
 import kotlin.io.encoding.Base64
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -77,6 +80,7 @@ import kotlin.time.Duration.Companion.milliseconds
 class ZetaHttpClientJvmTest {
     private val noDependencies = HttpClientDependencies(
         revocationChecker = null,
+        SystemZetaClock,
     )
     private fun startTlsServerWithCustomRoot(
         host: String = "localhost",
@@ -694,13 +698,17 @@ class ZetaHttpClientJvmTest {
         val (server, root) = startTlsServerWithCustomRoot()
         try {
             val handler = mockk<RevocationHandler>()
-            every { handler.getNextUpdateEpochSeconds(any(), any(), any()) } returns Clock.System.now().epochSeconds + 3600
-            every { handler.validate(any(), any(), any()) } throws IllegalStateException("Certificate is revoked")
+            every { handler.getOcspValidity(any(), any(), any()) } returns OcspValidity(
+                thisUpdateEpochSeconds = Clock.System.now().epochSeconds,
+                nextUpdateEpochSeconds = Clock.System.now().epochSeconds + 3600,
+            )
+            every { handler.validate(any(), any(), any(), any()) } throws IllegalStateException("Certificate is revoked")
 
             val revocationChecker = RevocationChecker(
                 storage = RevocationStorage(InMemoryStorage(), ResourceScope("https://localhost", emptyList())),
-                httpClient = HttpClient(MockEngine { error("unexpected network call: ${it.url}") }),
+                httpClient = ZetaHttpClient(HttpClient(MockEngine { error("unexpected network call: ${it.url}") })),
                 handler = handler,
+                clock = SystemZetaClock,
             )
 
             val client = ZetaHttpClientBuilder()
@@ -853,6 +861,20 @@ class ZetaHttpClientJvmTest {
         client.close()
 
         assertNull(System.getProperty("java.net.socks.username").takeIf { it == "null" })
+    }
+
+    @Test
+    fun buildInsecureTls_allows_tls13_negotiation() {
+        val (factory, _) = buildInsecureTls()
+
+        val socket = factory.createSocket() as SSLSocket
+        val enabledProtocols = socket.enabledProtocols.toList()
+
+        assertTrue(
+            "TLSv1.3" in enabledProtocols,
+            "Expected TLSv1.3 to be negotiable, got: $enabledProtocols",
+        )
+        socket.close()
     }
 
     private class CaptureLogger : Logger {

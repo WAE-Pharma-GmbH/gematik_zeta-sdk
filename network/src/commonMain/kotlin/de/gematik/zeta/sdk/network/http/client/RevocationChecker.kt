@@ -25,107 +25,229 @@
 package de.gematik.zeta.sdk.network.http.client
 
 import de.gematik.zeta.logging.Log
+import de.gematik.zeta.sdk.crypto.CertificateRevokedException
 import de.gematik.zeta.sdk.crypto.RevocationHandler
 import de.gematik.zeta.sdk.crypto.RevocationHandlerImpl
-import io.ktor.client.HttpClient
-import io.ktor.client.request.get
-import io.ktor.client.statement.bodyAsBytes
+import de.gematik.zeta.time.ZetaClock
 import io.ktor.util.sha1
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
-import kotlin.time.Clock
 
 public class RevocationChecker(
     private val storage: RevocationStorage,
-    private val httpClient: HttpClient = HttpClient(),
+    private val httpClient: ZetaHttpClient,
     private val handler: RevocationHandler = RevocationHandlerImpl(),
-    private val maxOcspAgeSeconds: Long = DEFAULT_OCSP_MAX_AGE_SECONDS,
-    private val minOcspCacheDurationSeconds: Long = DEFAULT_MIN_OCSP_CACHE_SECONDS,
+    private val cacheDurationSeconds: Long = DEFAULT_REVOCATION_CACHE_SECONDS,
     private val allowSkipForTestCertificates: Boolean = false,
+    private val clock: ZetaClock,
 ) {
+    /**
+     * Asks each source in turn - staple, OCSP (cache/network), CRL (cache/network) - and the
+     * first to answer settles it; the check fails only if none can. Network answers are
+     * cached under sha1(cert + issuer) once fully validated, so a hit needs only an expiry check;
+     * an expired entry is dropped and the source asked again. A revocation throws
+     * [CertificateRevokedException] and stops there - no later source may contradict it - while
+     * any other failure just moves on to the next source.
+     */
     public suspend fun validate(
         stapledOcspResponse: ByteArray?,
         certDer: ByteArray,
         issuerDer: ByteArray,
     ) {
-        if (stapledOcspResponse != null) {
-            Log.i {
-                "Using OCSP stapling response " +
-                    "(${stapledOcspResponse.size} bytes)"
+        try {
+            validateAgainstSources(stapledOcspResponse, certDer, issuerDer)
+        } catch (exception: CertificateRevokedException) {
+            if (skipForTestCertificates("certificate is revoked (${exception.message})")) {
+                return
             }
+            throw exception
+        }
+    }
 
-            validateOcspResponse(
-                ocspResponse = stapledOcspResponse,
-                certDer = certDer,
-                issuerDer = issuerDer,
-            )
+    private suspend fun validateAgainstSources(
+        stapledOcspResponse: ByteArray?,
+        certDer: ByteArray,
+        issuerDer: ByteArray,
+    ) {
+        Log.d {
+            "[REVOCATION] start: staple=" +
+                (stapledOcspResponse?.let { "${it.size} bytes" } ?: "none")
+        }
+
+        if (stapledOcspResponse != null) {
+            tryStaple(stapledOcspResponse, certDer, issuerDer)
             return
         }
+
+        Log.d { "[REVOCATION] no usable staple; trying OCSP" }
 
         val cacheKey = cacheKeyFor(certDer, issuerDer)
 
-        storage.getOcsp(cacheKey)?.let { cached ->
-            Log.i {
-                "Using cached OCSP response " +
-                    "(valid until ${cached.expiresAtEpochSeconds})"
-            }
-
-            handler.validate(
-                cached.responseDer,
-                certDer,
-                issuerDer,
-            )
-            return
-        }
-
-        Log.w {
-            "No OCSP stapling and no valid OCSP cache; " +
-                "attempting direct OCSP"
-        }
-
-        val ocspAttempt = tryDirectOcsp(
-            certDer = certDer,
-            issuerDer = issuerDer,
-        )
-
+        val ocspAttempt = tryOcsp(cacheKey, certDer, issuerDer)
         if (ocspAttempt.success) {
-            Log.i { "Successfully validated via direct OCSP" }
             return
         }
 
-        Log.w {
-            "Direct OCSP failed: ${ocspAttempt.error}; " +
-                "attempting CRL"
-        }
+        Log.d { "[REVOCATION] OCSP did not settle it; trying CRL" }
 
-        val crlAttempt = tryDirectCrl(
-            certDer = certDer,
-            issuerDer = issuerDer,
-        )
-
+        val crlAttempt = tryCrl(cacheKey, certDer, issuerDer)
         if (crlAttempt.success) {
-            Log.i { "Successfully validated via CRL" }
             return
         }
 
-        Log.e {
-            "CRL check failed: ${crlAttempt.error}"
-        }
-
-        if (allowSkipForTestCertificates) {
-            Log.w {
-                "Skipping revocation check because " +
-                    "allowSkipForTestCertificates is enabled"
-            }
+        if (skipForTestCertificates("every source failed")) {
             return
         }
+
+        Log.e { "[REVOCATION] every source failed" }
 
         error(
             "Certificate revocation check failed: " +
-                "no OCSP stapling; " +
-                "direct OCSP failed (${ocspAttempt.error}); " +
+                "no usable OCSP stapling or cache; direct OCSP failed (${ocspAttempt.error}); " +
                 "CRL check failed (${crlAttempt.error})",
         )
+    }
+
+    private fun skipForTestCertificates(reason: String): Boolean {
+        if (!allowSkipForTestCertificates) {
+            return false
+        }
+
+        Log.w { "[REVOCATION] $reason; skipping because allowSkipForTestCertificates is enabled" }
+        return true
+    }
+
+    /** OCSP from the cache, else straight from the responder. */
+    private suspend fun tryOcsp(
+        cacheKey: String,
+        certDer: ByteArray,
+        issuerDer: ByteArray,
+    ): ValidationAttempt {
+        if (tryCachedOcsp(cacheKey)) {
+            return ValidationAttempt(success = true)
+        }
+
+        return tryDirectOcsp(cacheKey, certDer, issuerDer)
+    }
+
+    /** CRL from the cache, else straight from the distribution point. */
+    private suspend fun tryCrl(
+        cacheKey: String,
+        certDer: ByteArray,
+        issuerDer: ByteArray,
+    ): ValidationAttempt {
+        if (tryCachedCrl(cacheKey)) {
+            return ValidationAttempt(success = true)
+        }
+
+        return tryDirectCrl(cacheKey, certDer, issuerDer)
+    }
+
+    /**
+     * Validates a stapled OCSP response.
+     *
+     * Returns true when the staple settled the revocation check. Anything else about it -
+     * stale, unreadable, forged, about another certificate - returns false, so the caller
+     * falls back to the cache / direct OCSP / CRL chain and asks a source it can trust.
+     *
+     * The exception is a revocation: that is a signed answer, and it is thrown rather than
+     * retried against a source that might be stale enough to contradict it.
+     */
+    private fun tryStaple(
+        staple: ByteArray,
+        certDer: ByteArray,
+        issuerDer: ByteArray,
+    ) {
+        Log.d { "[REVOCATION] staple: checking (${staple.size} bytes)" }
+
+        val now = clock.now()
+        val validity = handler.getOcspValidity(staple, certDer, issuerDer)
+
+        check(
+            isResponseFresh(
+                nextUpdate = validity.nextUpdateEpochSeconds,
+                thisUpdate = validity.thisUpdateEpochSeconds,
+                nowSeconds = now.epochSeconds,
+            ),
+        ) {
+            "Stapled OCSP response is stale: " +
+                "thisUpdate=${validity.thisUpdateEpochSeconds}," +
+                "nextUpdate=${validity.nextUpdateEpochSeconds}, now=${now.epochSeconds}"
+        }
+
+        handler.validate(staple, certDer, issuerDer, now)
+
+        Log.d { "[REVOCATION] staple: accepted" }
+    }
+
+    private suspend fun tryCachedOcsp(cacheKey: String): Boolean {
+        val cached = storage.getOcsp(cacheKey)
+        if (cached == null) {
+            Log.d { "[REVOCATION] cached OCSP: miss" }
+            return false
+        }
+
+        val canReuse = canReuseCachedEntry(
+            nextUpdate = cached.nextUpdateEpochSeconds,
+            thisUpdate = cached.thisUpdateEpochSeconds,
+            validatedAt = cached.validatedAtEpochSeconds,
+            nowSeconds = clock.now().epochSeconds,
+        )
+
+        if (!canReuse) {
+            Log.d {
+                "[REVOCATION] cached OCSP: no longer reusable, removing " +
+                    "(validatedAt=${cached.validatedAtEpochSeconds}, " +
+                    "nextUpdate=${cached.nextUpdateEpochSeconds}, " +
+                    "thisUpdate=${cached.thisUpdateEpochSeconds}, " +
+                    "cacheDuration=${cacheDurationSeconds}s)"
+            }
+            storage.clearOcsp(cacheKey)
+            return false
+        }
+
+        Log.d {
+            "[REVOCATION] cached OCSP: hit (validatedAt=${cached.validatedAtEpochSeconds}, " +
+                "nextUpdate=${cached.nextUpdateEpochSeconds}, " +
+                "thisUpdate=${cached.thisUpdateEpochSeconds}, " +
+                "cacheDuration=${cacheDurationSeconds}s)"
+        }
+        return true
+    }
+
+    private suspend fun tryCachedCrl(cacheKey: String): Boolean {
+        val cached = storage.getCrl(cacheKey)
+        if (cached == null) {
+            Log.d { "[REVOCATION] cached CRL: miss" }
+            return false
+        }
+
+        val canReuse = canReuseCachedEntry(
+            nextUpdate = cached.nextUpdateEpochSeconds,
+            thisUpdate = cached.thisUpdateEpochSeconds,
+            validatedAt = cached.validatedAtEpochSeconds,
+            nowSeconds = clock.now().epochSeconds,
+        )
+
+        if (!canReuse) {
+            Log.d {
+                "[REVOCATION] cached CRL: no longer reusable, removing " +
+                    "(validatedAt=${cached.validatedAtEpochSeconds}, " +
+                    "nextUpdate=${cached.nextUpdateEpochSeconds}, " +
+                    "thisUpdate=${cached.thisUpdateEpochSeconds}, " +
+                    "cacheDuration=${cacheDurationSeconds}s)"
+            }
+            storage.clearCrl(cacheKey)
+            return false
+        }
+
+        Log.d {
+            "[REVOCATION] cached CRL: hit (validatedAt=${cached.validatedAtEpochSeconds}, " +
+                "nextUpdate=${cached.nextUpdateEpochSeconds}, " +
+                "thisUpdate=${cached.thisUpdateEpochSeconds}, " +
+                "cacheDuration=${cacheDurationSeconds}s)"
+        }
+        return true
     }
 
     public suspend fun validateChain(
@@ -144,182 +266,128 @@ public class RevocationChecker(
             val issuerDer = chain[index + 1]
             val staple = if (index == 0) stapledOcspResponse else null
 
-            Log.i { "Validating revocation for chain link ${index + 1}/$linksToCheck" }
+            Log.d { "[REVOCATION] chain link ${index + 1}/$linksToCheck" }
             validate(staple, certDer, issuerDer)
         }
     }
 
     private suspend fun tryDirectOcsp(
+        cacheKey: String,
         certDer: ByteArray,
         issuerDer: ByteArray,
     ): ValidationAttempt {
         return try {
-            val requestData = handler.prepareOcspRequest(
-                certDer,
-                issuerDer,
-            )
-
+            Log.d { "[REVOCATION] direct OCSP: requesting" }
+            val requestData = handler.prepareOcspRequest(certDer, issuerDer)
             val response = fetchOcspDirect(
                 url = requestData.url,
                 requestDer = requestData.requestDer,
                 httpClient = httpClient,
             )
 
-            val expiresAt = validateOcspResponse(
-                ocspResponse = response,
-                certDer = certDer,
-                issuerDer = issuerDer,
-            )
+            val now = clock.now()
+            val (thisUpdate, nextUpdate) = handler.getOcspValidity(response, certDer, issuerDer)
 
-            val cacheKey = cacheKeyFor(certDer, issuerDer)
+            require(isResponseFresh(nextUpdate, thisUpdate, now.epochSeconds)) {
+                "OCSP response is not fresh: " +
+                    "thisUpdate=$thisUpdate, nextUpdate=$nextUpdate, now=$now"
+            }
+
+            handler.validate(response, certDer, issuerDer, now)
 
             storage.setOcsp(
                 cacheKey,
                 CachedOcspResponse(
                     responseDer = response,
-                    expiresAtEpochSeconds = expiresAt,
+                    validatedAtEpochSeconds = now.epochSeconds,
+                    nextUpdateEpochSeconds = nextUpdate,
+                    thisUpdateEpochSeconds = thisUpdate,
                 ),
             )
 
+            Log.d {
+                "[REVOCATION] direct OCSP: accepted and cached " +
+                    "(validatedAt=$now, nextUpdate=$nextUpdate, thisUpdate=$thisUpdate)"
+            }
             ValidationAttempt(success = true)
+        } catch (revoked: CertificateRevokedException) {
+            throw revoked
         } catch (e: Exception) {
-            ValidationAttempt(
-                success = false,
-                error = e.message ?: "Unknown OCSP error",
-            )
+            val error = e.message ?: "Unknown OCSP error"
+            Log.w { "[REVOCATION] direct OCSP: failed ($error)" }
+            ValidationAttempt(success = false, error = error)
         }
     }
 
     private suspend fun tryDirectCrl(
+        cacheKey: String,
         certDer: ByteArray,
         issuerDer: ByteArray,
     ): ValidationAttempt {
         return try {
-            val cacheKey = cacheKeyFor(certDer, issuerDer)
-
-            storage.getCrl(cacheKey)?.let { cached ->
-                Log.i {
-                    "Using cached CRL response " +
-                        "(valid until ${cached.expiresAtEpochSeconds})"
-                }
-
-                handler.validateCrl(
-                    cached.crlDer,
-                    certDer,
-                    issuerDer,
-                )
-
-                return ValidationAttempt(success = true)
+            val crlUrl = handler.extractCrlUrl(certDer)
+            if (crlUrl == null) {
+                Log.w { "[REVOCATION] direct CRL: certificate names no distribution point" }
+                return ValidationAttempt(success = false, error = "No CRL URL in certificate")
             }
 
-            val crlUrl = handler.extractCrlUrl(certDer)
-                ?: return ValidationAttempt(
-                    success = false,
-                    error = "No CRL URL in certificate",
-                )
+            Log.d { "[REVOCATION] direct CRL: fetching from $crlUrl" }
+            val crlDer = httpClient.get(crlUrl).bodyAsBytes()
+            Log.d { "[REVOCATION] direct CRL: fetched ${crlDer.size} bytes" }
 
-            Log.i { "Fetching CRL from: $crlUrl" }
+            val now = clock.now()
+            val (thisUpdate, nextUpdate) = handler.getCrlValidity(crlDer)
 
-            val crlDer = httpClient
-                .get(crlUrl)
-                .bodyAsBytes()
+            require(isResponseFresh(nextUpdate, thisUpdate, now.epochSeconds)) {
+                "CRL is not fresh: " +
+                    "thisUpdate=$thisUpdate, nextUpdate=$nextUpdate, now=$now"
+            }
 
-            Log.i { "CRL fetched: ${crlDer.size} bytes" }
-
-            handler.validateCrl(
-                crlDer,
-                certDer,
-                issuerDer,
-            )
-
-            val expiresAt =
-                handler.getCrlNextUpdateEpochSeconds(crlDer)
-                    ?: (
-                        Clock.System.now().epochSeconds +
-                            DEFAULT_CRL_MAX_AGE_SECONDS
-                        )
+            handler.validateCrl(crlDer, certDer, issuerDer, now)
 
             storage.setCrl(
                 cacheKey,
                 CachedCrlResponse(
                     crlDer = crlDer,
-                    expiresAtEpochSeconds = expiresAt,
+                    validatedAtEpochSeconds = now.epochSeconds,
+                    nextUpdateEpochSeconds = nextUpdate,
+                    thisUpdateEpochSeconds = thisUpdate,
                 ),
             )
 
+            Log.d {
+                "[REVOCATION] direct CRL: accepted and cached " +
+                    "(validatedAt=$now, nextUpdate=$nextUpdate, thisUpdate=$thisUpdate)"
+            }
             ValidationAttempt(success = true)
+        } catch (revoked: CertificateRevokedException) {
+            throw revoked
         } catch (e: Exception) {
-            ValidationAttempt(
-                success = false,
-                error = e.message ?: "Unknown CRL error",
-            )
+            val error = e.message ?: "Unknown CRL error"
+            Log.w { "[REVOCATION] direct CRL: failed ($error)" }
+            ValidationAttempt(success = false, error = error)
         }
     }
 
-    private fun validateOcspResponse(
-        ocspResponse: ByteArray,
-        certDer: ByteArray,
-        issuerDer: ByteArray,
-    ): Long {
-        val nowSeconds = Clock.System.now().epochSeconds
+    private fun isResponseFresh(
+        nextUpdate: Long?,
+        thisUpdate: Long,
+        nowSeconds: Long,
+    ): Boolean = if (nextUpdate != null) {
+        nowSeconds < nextUpdate
+    } else {
+        nowSeconds < thisUpdate + MAX_CACHE_AGE_NO_NEXT_UPDATE_SECONDS
+    }
 
-        val nextUpdate = handler.getNextUpdateEpochSeconds(
-            ocspResponse,
-            certDer,
-            issuerDer,
-        )
-
-        val expiresAt = if (nextUpdate != null) {
-            require(nowSeconds < nextUpdate) {
-                "OCSP response expired: " +
-                    "nextUpdate=$nextUpdate, now=$nowSeconds"
-            }
-
-            val flooredExpiresAt = maxOf(
-                nextUpdate,
-                nowSeconds + minOcspCacheDurationSeconds,
-            )
-
-            Log.i {
-                "OCSP response valid until: $nextUpdate " +
-                    "(cached until $flooredExpiresAt, " +
-                    "min cache ${minOcspCacheDurationSeconds / 3600}h)"
-            }
-
-            flooredExpiresAt
-        } else {
-            val producedAt =
-                handler.getThisUpdateEpochSeconds(ocspResponse)
-
-            val ageSeconds = nowSeconds - producedAt
-
-            require(ageSeconds >= 0) {
-                "OCSP response producedAt is in the future: " +
-                    "producedAt=$producedAt, now=$nowSeconds"
-            }
-
-            Log.i {
-                "OCSP response age: ${ageSeconds}s " +
-                    "(no nextUpdate, maximum age " +
-                    "${maxOcspAgeSeconds / 3600}h)"
-            }
-
-            require(ageSeconds <= maxOcspAgeSeconds) {
-                "OCSP response too old: " +
-                    "${ageSeconds / 3600}h " +
-                    "(maximum ${maxOcspAgeSeconds / 3600}h)"
-            }
-
-            producedAt + maxOcspAgeSeconds
-        }
-
-        handler.validate(
-            ocspResponse,
-            certDer,
-            issuerDer,
-        )
-
-        return expiresAt
+    private fun canReuseCachedEntry(
+        nextUpdate: Long?,
+        thisUpdate: Long,
+        validatedAt: Long,
+        nowSeconds: Long,
+    ): Boolean = if (nextUpdate != null) {
+        nowSeconds < minOf(nextUpdate, validatedAt + cacheDurationSeconds)
+    } else {
+        nowSeconds < thisUpdate + MAX_CACHE_AGE_NO_NEXT_UPDATE_SECONDS
     }
 
     public suspend fun clear() {
@@ -342,6 +410,5 @@ public fun cacheKeyFor(
     )
 }
 
-private const val DEFAULT_OCSP_MAX_AGE_SECONDS = 24 * 3600L
-private const val DEFAULT_CRL_MAX_AGE_SECONDS = 24 * 3600L
-private const val DEFAULT_MIN_OCSP_CACHE_SECONDS = 3_600L
+public const val DEFAULT_REVOCATION_CACHE_SECONDS: Long = 3_600L
+public const val MAX_CACHE_AGE_NO_NEXT_UPDATE_SECONDS: Long = 24 * 3_600L
